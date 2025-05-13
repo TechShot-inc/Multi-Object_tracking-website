@@ -117,15 +117,32 @@ document.addEventListener('DOMContentLoaded', () => {
         // Show the results container
         resultsContainer.style.display = 'block';
         
-        // Set the video source
+        // Set the video source with error handling
         resultVideo.src = `/results/${resultId}/video`;
+        
+        // Add event listeners for video loading
+        resultVideo.onerror = function() {
+            console.error("Error loading video");
+            statusMessage.textContent = "Error loading video. Please try refreshing the page.";
+        };
+        
+        resultVideo.onloadeddata = function() {
+            console.log("Video loaded successfully");
+        };
+        
+        // Force the video element to load
+        resultVideo.load();
         
         // Reset the upload button
         uploadButton.disabled = false;
         uploadButton.textContent = 'Upload & Process';
         
         // Configure download buttons
-        downloadVideoBtn.onclick = () => window.location.href = `/results/${resultId}/video`;
-        downloadAnnotationsBtn.onclick = () => window.location.href = `/results/${resultId}/annotations`;
+        downloadVideoBtn.onclick = () => {
+            window.open(`/results/${resultId}/video`, '_blank');
+        };
+        downloadAnnotationsBtn.onclick = () => {
+            window.open(`/results/${resultId}/annotations`, '_blank');
+        };
     }
 }); 
