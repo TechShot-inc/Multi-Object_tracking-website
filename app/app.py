@@ -117,5 +117,5 @@ def get_annotations(result_id):
     result_dir = os.path.join(app.config['RESULTS_FOLDER'], result_id)
     return send_from_directory(result_dir, 'annotations.json')
 
-if __name__ == '__main__':
-    app.run(debug=True) 
+if __name__ == '__main__':    
+    app.run(debug=True, ssl_context='adhoc') 
