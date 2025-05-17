@@ -9,6 +9,10 @@ import random
 import re
 import subprocess
 import shutil
+from app.realtimetracking import RealTimeTrackingService
+import base64
+import cv2
+import numpy as np
 
 app = Flask(__name__)
 
@@ -35,6 +39,15 @@ os.makedirs(app.config['RESULTS_FOLDER'], exist_ok=True)
 
 # Processing status dictionary
 processing_status = {}
+
+# Initialize the real-time tracking service once
+global_realtime_service = None
+
+def get_realtime_service():
+    global global_realtime_service
+    if global_realtime_service is None:
+        global_realtime_service = RealTimeTrackingService()
+    return global_realtime_service
 
 def allowed_file(filename):
     return '.' in filename and \
@@ -444,6 +457,26 @@ def video_player(result_id):
     # Generate video URL
     video_url = url_for('get_video', result_id=result_id)
     return render_template('video_player.html', video_url=video_url)
+
+@app.route('/realtime-track', methods=['POST'])
+def realtime_track():
+    service = get_realtime_service()
+    if 'frame' not in request.files:
+        return jsonify({'error': 'No frame uploaded'}), 400
+    file = request.files['frame']
+    # Read image as numpy array
+    file_bytes = np.frombuffer(file.read(), np.uint8)
+    img = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
+    if img is None:
+        return jsonify({'error': 'Invalid image'}), 400
+    annotated, detections = service.process_frame(img)
+    # Encode annotated image as JPEG base64
+    _, buffer = cv2.imencode('.jpg', annotated)
+    annotated_b64 = base64.b64encode(buffer).decode('utf-8')
+    return jsonify({
+        'annotated': annotated_b64,
+        'count': len(detections)
+    })
 
 if __name__ == '__main__':    
     app.run(debug=True, ssl_context='adhoc') 
