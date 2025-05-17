@@ -8,7 +8,9 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
     <!-- Load TensorFlow.js -->
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@3.11.0/dist/tf.min.js"></script>
-    <!-- Load KalmanJS -->
+    <!-- Load COCO-SSD model -->
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
+    <!-- Load KalmanJS for smooth tracking -->
     <script src="https://cdn.jsdelivr.net/npm/kalmanjs@1.1.0/dist/kalman.min.js"></script>
 </head>
 
@@ -33,16 +35,24 @@
                     <input type="file" id="video-file" name="video" accept="video/mp4,video/avi,video/mov,video/mkv">
                     <label for="video-file">Choose a video file</label>
                 </div>
+                <div class="form-group">
+                    <label for="speed">Frame Extraction Speed (1 = every frame, 5 = every 5th frame):</label>
+                    <input type="number" id="speed" name="speed" min="1" max="30" value="5" required>
+                </div>
+                <div class="form-group">
+                    <label for="output_speed">Output Video Speed Multiplier (1 = normal, 2 = 2x faster):</label>
+                    <input type="number" id="output_speed" name="output_speed" min="1" max="10" value="2" required>
+                </div>
                 <button type="submit" id="upload-button">Upload & Process</button>
             </form>
-
+            
             <div id="upload-status" class="status-container">
                 <div class="status-message"></div>
                 <div class="progress-container">
                     <div class="progress-bar"></div>
                 </div>
             </div>
-
+            
             <div id="results-container" style="display: none;">
                 <h3>Results</h3>
                 <div class="video-result">
@@ -79,6 +89,26 @@
                 <div>FPS: <span id="fps">0</span></div>
             </div>
         </section>
+        
+        <!-- Optional: Alternative HTML5 Player Section -->
+        <section id="html5-player" style="display: none;">
+            <h2>HTML5 Video Player</h2>
+            <p>If the regular video player doesn't work, you can use this alternative player.</p>
+            
+            <div class="player-container">
+                <video id="alt-player" controls>
+                    <source id="alt-player-source" src="" type="video/mp4">
+                    Your browser does not support the video tag.
+                </video>
+            </div>
+            
+            <div class="player-controls">
+                <button onclick="document.getElementById('alt-player').play()">Play</button>
+                <button onclick="document.getElementById('alt-player').pause()">Pause</button>
+                <button onclick="document.getElementById('alt-player').currentTime = 0">Restart</button>
+                <button onclick="toggleFullScreen('alt-player')">Fullscreen</button>
+            </div>
+        </section>
     </main>
 
     <footer>
@@ -88,6 +118,38 @@
     <!-- Load custom scripts -->
     <script src="{{ url_for('static', filename='js/upload.js') }}"></script>
     <script src="{{ url_for('static', filename='js/tracking.js') }}"></script>
+    
+    <!-- Additional helper functions -->
+    <script>
+        // Function to toggle fullscreen for HTML5 video player
+        function toggleFullScreen(elementId) {
+            const video = document.getElementById(elementId);
+            if (!document.fullscreenElement) {
+                if (video.requestFullscreen) {
+                    video.requestFullscreen();
+                } else if (video.webkitRequestFullscreen) { /* Safari */
+                    video.webkitRequestFullscreen();
+                } else if (video.msRequestFullscreen) { /* IE11 */
+                    video.msRequestFullscreen();
+                }
+            } else {
+                if (document.exitFullscreen) {
+                    document.exitFullscreen();
+                } else if (document.webkitExitFullscreen) { /* Safari */
+                    document.webkitExitFullscreen();
+                } else if (document.msExitFullscreen) { /* IE11 */
+                    document.msExitFullscreen();
+                }
+            }
+        }
+        
+        // Function to show alternative player if needed
+        function showAltPlayer(videoUrl) {
+            document.getElementById('html5-player').style.display = 'block';
+            document.getElementById('alt-player-source').src = videoUrl;
+            document.getElementById('alt-player').load();
+        }
+    </script>
 </body>
 
 </html>

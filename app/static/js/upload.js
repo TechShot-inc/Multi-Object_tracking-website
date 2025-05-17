@@ -13,14 +13,12 @@ document.addEventListener('DOMContentLoaded', () => {
     let resultId = null;
     let statusCheckInterval = null;
     
-    // Update the file input label with the selected filename
     videoFile.addEventListener('change', () => {
         const fileName = videoFile.files[0] ? videoFile.files[0].name : 'Choose a video file';
         const fileLabel = videoFile.nextElementSibling;
         fileLabel.textContent = fileName;
     });
     
-    // Handle form submission
     uploadForm.addEventListener('submit', async (e) => {
         e.preventDefault();
         
@@ -32,23 +30,23 @@ document.addEventListener('DOMContentLoaded', () => {
         const file = videoFile.files[0];
         const formData = new FormData();
         formData.append('video', file);
+        const speedValue = document.getElementById('speed').value;
+        formData.append('speed', speedValue);
+        const outputSpeedValue = document.getElementById('output_speed').value;
+        formData.append('output_speed', outputSpeedValue);
         
-        // Disable the upload button during upload
         uploadButton.disabled = true;
         uploadButton.textContent = 'Uploading...';
         
-        // Update status message
         statusMessage.textContent = 'Uploading video...';
         progressBar.style.width = '0%';
         
         try {
-            // Upload the video
             const response = await fetch('/upload', {
                 method: 'POST',
                 body: formData
             });
             
-            // Show progress during upload (simulated)
             let progress = 0;
             const progressInterval = setInterval(() => {
                 progress += 5;
@@ -67,10 +65,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 progressBar.style.width = '100%';
                 statusMessage.textContent = 'Video uploaded. Processing...';
                 
-                // Store the result ID for checking status and retrieving results
                 resultId = data.result_id;
-                
-                // Start checking processing status
                 checkProcessingStatus();
             } else {
                 throw new Error(data.message || 'Failed to upload video');
@@ -82,7 +77,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
     
-    // Function to check video processing status
     function checkProcessingStatus() {
         if (!resultId) return;
         
@@ -92,52 +86,52 @@ document.addEventListener('DOMContentLoaded', () => {
                 const data = await response.json();
                 
                 if (data.status === 'completed') {
-                    // Processing complete, show results
                     statusMessage.textContent = 'Processing complete!';
                     clearInterval(statusCheckInterval);
                     showResults();
                 } else if (data.status === 'failed') {
-                    // Processing failed
                     statusMessage.textContent = `Processing failed: ${data.error || 'Unknown error'}`;
                     clearInterval(statusCheckInterval);
                     uploadButton.disabled = false;
                     uploadButton.textContent = 'Upload & Process';
                 }
-                // If status is 'processing', just keep waiting
             } catch (error) {
                 console.error('Error checking status:', error);
             }
-        }, 2000); // Check every 2 seconds
+        }, 2000);
     }
     
-    // Function to display results
-    function showResults() {
+    async function showResults() {
         if (!resultId) return;
         
-        // Show the results container
         resultsContainer.style.display = 'block';
-        
-        // Set the video source with error handling
         resultVideo.src = `/results/${resultId}/video`;
         
-        // Add event listeners for video loading
+        try {
+            const response = await fetch(`/results/${resultId}/annotations`);
+            const annotations = await response.json();
+            console.log(`Loaded annotations with ${Object.keys(annotations).length} frames`);
+            overlayAnnotations(annotations);
+        } catch (error) {
+            console.error("Error loading annotations:", error);
+            statusMessage.textContent = "Error loading annotations.";
+        }
+        
         resultVideo.onerror = function() {
             console.error("Error loading video");
-            statusMessage.textContent = "Error loading video. Please try refreshing the page.";
+            statusMessage.textContent = "Error loading video. Trying alternative player...";
+            showAltPlayer(`/results/${resultId}/video`);
         };
         
         resultVideo.onloadeddata = function() {
             console.log("Video loaded successfully");
         };
         
-        // Force the video element to load
         resultVideo.load();
         
-        // Reset the upload button
         uploadButton.disabled = false;
         uploadButton.textContent = 'Upload & Process';
         
-        // Configure download buttons
         downloadVideoBtn.onclick = () => {
             window.open(`/results/${resultId}/video`, '_blank');
         };
@@ -145,4 +139,31 @@ document.addEventListener('DOMContentLoaded', () => {
             window.open(`/results/${resultId}/annotations`, '_blank');
         };
     }
-}); 
+    
+    function overlayAnnotations(annotations) {
+        const canvas = document.createElement('canvas');
+        canvas.style.position = 'absolute';
+        canvas.style.top = resultVideo.offsetTop + 'px';
+        canvas.style.left = resultVideo.offsetLeft + 'px';
+        canvas.width = resultVideo.videoWidth;
+        canvas.height = resultVideo.videoHeight;
+        resultVideo.parentElement.appendChild(canvas);
+        
+        const ctx = canvas.getContext('2d');
+        
+        resultVideo.addEventListener('timeupdate', () => {
+            const frameId = Math.floor(resultVideo.currentTime * 30) + 1; // Assuming 30 FPS
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            if (annotations[frameId]) {
+                annotations[frameId].forEach(det => {
+                    ctx.strokeStyle = 'red';
+                    ctx.lineWidth = 2;
+                    ctx.strokeRect(det.x, det.y, det.width, det.height);
+                    ctx.fillStyle = 'red';
+                    ctx.font = '16px Arial';
+                    ctx.fillText(`ID: ${det.id}`, det.x, det.y - 5);
+                });
+            }
+        });
+    }
+});
