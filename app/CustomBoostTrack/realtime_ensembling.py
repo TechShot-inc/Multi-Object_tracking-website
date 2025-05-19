@@ -4,6 +4,7 @@ import sys
 import numpy as np
 import torch
 from ultralytics import YOLO
+import cv2
 
 # Add CustomBoostTrack to sys.path
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -18,15 +19,20 @@ class RealTimeTracker:
         """Initialize tracker with YOLO models and BoostTrack."""
         self.frame_rate = frame_rate
         self.frame_id = 0
+        
+        # Set device
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        print(f"Using device: {self.device}")
 
         # Initialize YOLO models with FP16
-        self.model1 = YoloDetector(model1_path, conf=0.3)
-        self.model2 = YoloDetector(model2_path, conf=0.3)
-        # self.model1 = YoloDetector("yolo11x.pt", conf=0.3)
-        # self.model2 = YoloDetector("yolo12x.pt", conf=0.3)
+        self.model1 = YoloDetector("yolo11x.pt", conf=0.3)
+        self.model2 = YoloDetector("yolo12x.pt", conf=0.3)
         try:
             self.model1.model.float16 = True  # Enable FP16
             self.model2.model.float16 = True
+            # Move models to GPU
+            self.model1.model.to(self.device)
+            self.model2.model.to(self.device)
         except AttributeError:
             print("Warning: FP16 not supported by ultralytics, using FP32")
 
@@ -66,37 +72,102 @@ class RealTimeTracker:
             std=(0.229, 0.224, 0.225)
         )
 
-        # Cache for detections
-        self.cached_detections = None
-        self.model1_interval = 1  # Increased for performance
-        self.model2_interval = 2  # Increased for performance
-
-    def update(self, frame, frame_id):
+    def update(self, frame, frame_id, roi=None):
         """Process a single frame and return detections."""
         self.frame_id = frame_id
         start_time = time.time()
 
-        # Preprocess frame
+        # Validate and apply ROI
+        original_frame = frame.copy()
+        roi_applied = False
+        x, y, w, h = 0, 0, frame.shape[1], frame.shape[0]
+
+        if roi:
+            try:
+                if not isinstance(roi, dict) or not all(k in roi for k in ['x', 'y', 'width', 'height']):
+                    print(f"Invalid ROI format: {roi}")
+                    roi = None
+                else:
+                    # Convert relative coordinates to absolute if needed
+                    if all(0 <= float(roi[k]) <= 1.0 for k in ['x', 'y', 'width', 'height']):
+                        x = int(float(roi['x']) * frame.shape[1])
+                        y = int(float(roi['y']) * frame.shape[0])
+                        w = int(float(roi['width']) * frame.shape[1])
+                        h = int(float(roi['height']) * frame.shape[0])
+                    else:
+                        x = int(float(roi['x']))
+                        y = int(float(roi['y']))
+                        w = int(float(roi['width']))
+                        h = int(float(roi['height']))
+                    
+                    # Ensure coordinates are valid
+                    x = max(0, x)
+                    y = max(0, y)
+                    w = min(w, frame.shape[1] - x)
+                    h = min(h, frame.shape[0] - y)
+                    
+                    # Calculate minimum size (5% of frame dimensions)
+                    min_width = int(frame.shape[1] * 0.05)
+                    min_height = int(frame.shape[0] * 0.05)
+                    
+                    if w >= min_width and h >= min_height:
+                        # Create a contiguous copy of the ROI
+                        frame = np.ascontiguousarray(frame[y:y+h, x:x+w])
+                        roi_applied = True
+                        print(f"Tracker: Using ROI with dimensions {w}x{h} (min: {min_width}x{min_height})")
+                    else:
+                        print(f"Tracker: ROI too small ({w}x{h}), minimum required: {min_width}x{min_height}")
+                        roi = None
+            except (KeyError, TypeError, ValueError) as e:
+                print(f"Error processing ROI: {e}")
+                roi = None
+
+        # Ensure frame is in BGR format for OpenCV operations
+        if frame.shape[2] != 3:
+            print("Warning: Converting frame to BGR format")
+            frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+
+        # Create a copy for detection and ensure it's in RGB format for YOLO
+        detection_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+
+        # Preprocess frame for tracking
         height, width = frame.shape[:2]
         img, _ = self.preproc(frame, None, (height, width))
         img = img.reshape(1, *img.shape)
+        img = torch.from_numpy(img).to(self.device)  # Move to GPU
 
-        # Run detection based on schedule
-        use_model1 = (frame_id % self.model1_interval == 1)
-        use_model2 = (frame_id % self.model2_interval == 1)
-
-        if use_model1 or use_model2:
-            dets = self.detector(frame)
-            if len(dets) > 0:
-                self.cached_detections = dets.numpy()
-            else:
-                self.cached_detections = np.empty((0, 5))
+        # Run detection with ensembling for every frame
+        dets = self.detector(detection_frame)
+        if len(dets) == 0:
+            dets = np.empty((0, 5))
         else:
-            dets = self.cached_detections if self.cached_detections is not None else np.empty((0, 5))
+            # Filter detections to only include those within the ROI
+            if roi_applied:
+                # Convert detections to absolute coordinates
+                if torch.is_tensor(dets):
+                    dets_abs = dets.clone().cpu().numpy()
+                else:
+                    dets_abs = dets.copy()
+                
+                dets_abs[:, 0] += x  # x1
+                dets_abs[:, 1] += y  # y1
+                dets_abs[:, 2] += x  # x2
+                dets_abs[:, 3] += y  # y2
+                
+                # Check if detection is within ROI
+                in_roi = (
+                    (dets_abs[:, 0] >= x) &  # x1 >= roi_x
+                    (dets_abs[:, 1] >= y) &  # y1 >= roi_y
+                    (dets_abs[:, 2] <= x + w) &  # x2 <= roi_x + roi_w
+                    (dets_abs[:, 3] <= y + h)  # y2 <= roi_y + roi_h
+                )
+                dets = dets[in_roi]
+                print(f"Filtered detections: {len(dets)} within ROI")
 
         # Run BoostTrack
-        if dets is not None and len(dets) > 0:
+        if len(dets) > 0:
             try:
+                # Use the original BGR frame for the tracker
                 targets = self.tracker.update(dets, img, frame, f"realtime:{frame_id}")
                 # Minimal filtering: confidence > 0.2
                 if len(targets) > 0:
@@ -108,6 +179,12 @@ class RealTimeTracker:
                 tlwhs, ids, confs = [], [], []
         else:
             tlwhs, ids, confs = [], [], []
+
+        # Adjust detections for ROI offset
+        if roi_applied:
+            for tlwh in tlwhs:
+                tlwh[0] += x  # Adjust x
+                tlwh[1] += y  # Adjust y
 
         # Format detections for output
         detections = []

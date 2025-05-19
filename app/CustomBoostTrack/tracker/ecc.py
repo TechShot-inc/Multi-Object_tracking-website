@@ -136,14 +136,31 @@ class ECC:
 
     def __call__(self, np_image: np.ndarray, frame_id: int, video: Optional[str] = "") -> np.ndarray:
         if frame_id == 1:
-            self.prev_image = deepcopy(np_image)
+            # Ensure image is in BGR format for storage
+            if np_image.shape[2] == 3:
+                self.prev_image = cv2.cvtColor(np_image, cv2.COLOR_RGB2BGR) if np_image.dtype == np.uint8 else np_image
+            else:
+                self.prev_image = deepcopy(np_image)
             return np.eye(3, dtype=float)
+        
         key = "{}-{}".format(video, frame_id)
         if key in self.cache:
             return self.cache[key]
 
-        result, _ = ecc(self.prev_image, np_image, self.wrap_mode, self.eps, self.max_iter, self.scale, self.align)
-        self.prev_image = deepcopy(np_image)
+        # Ensure current image is in BGR format
+        if np_image.shape[2] == 3:
+            current_image = cv2.cvtColor(np_image, cv2.COLOR_RGB2BGR) if np_image.dtype == np.uint8 else np_image
+        else:
+            current_image = np_image
+
+        # Ensure both images are in the same format
+        if self.prev_image.shape != current_image.shape:
+            print(f"Warning: Image shape mismatch. Prev: {self.prev_image.shape}, Current: {current_image.shape}")
+            return np.eye(3, dtype=float)
+
+        result, _ = ecc(self.prev_image, current_image, self.wrap_mode, self.eps, self.max_iter, self.scale, self.align)
+        self.prev_image = deepcopy(current_image)
+        
         if result.shape == (2, 3):
             result = np.vstack((result, np.array([[0, 0, 1]], dtype=float)))
 

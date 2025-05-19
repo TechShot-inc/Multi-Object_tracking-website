@@ -1,267 +1,278 @@
-/* Global Styles */
+/* Professional Styles for Multi-Object Tracking Application */
 :root {
-    --primary-color: #3498db;
-    --secondary-color: #2ecc71;
-    --accent-color: #e74c3c;
-    --dark-color: #2c3e50;
-    --light-color: #ecf0f1;
-    --shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+    /* Corporate Color Palette */
+    --primary: #1A3C6D; /* Navy Blue */
+    --primary-light: #2B579A; /* Lighter Navy */
+    --secondary: #00C4B4; /* Teal */
+    --secondary-light: #14D4C4; /* Lighter Teal */
+    --accent: #FFD700; /* Gold */
+    --dark: #2D3436; /* Dark Gray */
+    --light: #F8F9FA; /* Light Gray */
+    --success: #28A745; /* Green */
+    --danger: #DC3545; /* Red */
+    --info: #17A2B8; /* Cyan */
+    --warning: #FFC107; /* Amber */
+    --gray-light: #E9ECEF; /* Light Gray */
+    --gray-medium: #6C757D; /* Medium Gray */
+    --gray-dark: #343A40; /* Dark Gray */
+    --text: #212529; /* Near Black */
+    --border-radius: 0.5rem;
+    --transition-speed: 0.3s;
+    --shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+    --premium-gradient: linear-gradient(135deg, #1A3C6D, #00C4B4);
 }
 
-* {
-    box-sizing: border-box;
+/* Base Styles */
+body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background-color: var(--light);
+    color: var(--text);
+    line-height: 1.6;
     margin: 0;
     padding: 0;
 }
 
-body {
-    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-    line-height: 1.6;
-    color: #333;
-    background-color: var(--light-color);
-}
-
-a {
-    color: var(--primary-color);
-    text-decoration: none;
-}
-
 /* Header */
 header {
-    background-color: var(--dark-color);
-    color: white;
-    padding: 1rem 2rem;
+    background: var(--premium-gradient);
+    padding: 2rem 2.5rem;
     box-shadow: var(--shadow);
+    color: white;
 }
 
 header h1 {
-    margin-bottom: 1rem;
+    font-size: 2.25rem;
+    font-weight: 700;
+    margin: 0;
 }
 
-nav ul {
-    display: flex;
-    list-style: none;
-}
-
-nav ul li {
-    margin-right: 1.5rem;
-}
-
-nav ul li a {
+header nav a {
     color: white;
-    font-weight: 500;
-    transition: color 0.3s;
+    padding: 0.75rem 1.5rem;
+    border-radius: var(--border-radius);
+    transition: background-color var(--transition-speed) ease;
 }
 
-nav ul li a:hover {
-    color: var(--primary-color);
+header nav a:hover {
+    background-color: rgba(255, 255, 255, 0.1);
 }
 
-/* Main Content */
+/* Main Container */
 main {
     max-width: 1200px;
     margin: 2rem auto;
-    padding: 0 2rem;
 }
 
+/* Sections */
 section {
-    background-color: white;
-    border-radius: 8px;
+    background: white;
+    border-radius: var(--border-radius);
     padding: 2rem;
     margin-bottom: 2rem;
     box-shadow: var(--shadow);
 }
 
 section h2 {
-    color: var(--dark-color);
-    margin-bottom: 1rem;
-    border-bottom: 2px solid var(--primary-color);
-    padding-bottom: 0.5rem;
+    font-size: 1.75rem;
+    color: var(--primary);
+    margin-bottom: 1.5rem;
 }
 
-/* Video Upload Section */
-.file-input-container {
-    margin: 1.5rem 0;
+/* Form Elements */
+input, select, button {
+    border: 2px solid var(--gray-light);
+    border-radius: var(--border-radius);
+    padding: 0.75rem 1rem;
+    transition: all var(--transition-speed) ease;
 }
 
-input[type="file"] {
-    display: none;
-}
-
-.file-input-container label {
-    display: block;
-    background-color: var(--primary-color);
-    color: white;
-    padding: 1rem;
-    text-align: center;
-    border-radius: 4px;
-    cursor: pointer;
-    transition: background-color 0.3s;
-}
-
-.file-input-container label:hover {
-    background-color: #2980b9;
+input:focus, select:focus {
+    border-color: var(--secondary);
+    box-shadow: 0 0 0 3px rgba(0, 196, 180, 0.1);
+    outline: none;
 }
 
 button {
-    background-color: var(--secondary-color);
+    background: var(--premium-gradient);
     color: white;
     border: none;
-    padding: 0.8rem 1.5rem;
-    border-radius: 4px;
+    padding: 0.75rem 1.5rem;
+    font-weight: 500;
+    border-radius: var(--border-radius);
     cursor: pointer;
-    font-size: 1rem;
-    transition: background-color 0.3s;
+    transition: all var(--transition-speed) ease;
 }
 
-button:hover {
-    background-color: #27ae60;
+button:hover:not(:disabled) {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 25px rgba(26, 115, 232, 0.15);
 }
 
 button:disabled {
-    background-color: #95a5a6;
+    opacity: 0.5;
     cursor: not-allowed;
 }
 
-#upload-button {
-    display: block;
+/* Canvas and Video */
+canvas, video {
+    border: 2px solid var(--gray-light);
+    border-radius: var(--border-radius);
     width: 100%;
-    margin-top: 1rem;
+    transition: border-color var(--transition-speed) ease;
 }
 
-.status-container {
-    margin-top: 1.5rem;
-    padding: 1rem;
-    border: 1px solid #ddd;
-    border-radius: 4px;
-    background-color: #f9f9f9;
-}
-
-.status-message {
-    margin-bottom: 0.5rem;
-}
-
-.progress-container {
-    height: 20px;
-    background-color: #ddd;
-    border-radius: 10px;
-    overflow: hidden;
-}
-
-.progress-bar {
-    height: 100%;
-    background-color: var(--primary-color);
-    width: 0%;
-    transition: width 0.3s;
-}
-
-.video-result {
-    margin: 1.5rem 0;
-}
-
-#result-video {
-    width: 100%;
-    max-height: 500px;
-    border-radius: 4px;
-}
-
-.download-options {
-    display: flex;
-    justify-content: space-between;
-}
-
-.download-options button {
-    flex: 1;
-    margin: 0 0.5rem;
-}
-
-.download-options button:first-child {
-    margin-left: 0;
-}
-
-.download-options button:last-child {
-    margin-right: 0;
-}
-
-/* Real-Time Tracking Section */
-.camera-controls {
-    margin-bottom: 1.5rem;
-    display: flex;
-    align-items: center;
-    flex-wrap: wrap;
-}
-
-.camera-controls label {
-    margin-right: 0.5rem;
-}
-
-.camera-controls select {
-    padding: 0.5rem;
-    border-radius: 4px;
-    border: 1px solid #ddd;
-    margin-right: 1rem;
-}
-
-#start-tracking, #stop-tracking {
-    margin-right: 0.5rem;
+canvas:hover, video:hover {
+    border-color: var(--secondary);
 }
 
 .video-container {
     position: relative;
-    width: 100%;
-    height: 0;
-    padding-bottom: 56.25%; /* 16:9 Aspect Ratio */
+    border-radius: var(--border-radius);
+    box-shadow: var(--shadow);
+    overflow: hidden;
 }
 
-#camera-feed, #tracking-overlay {
+.roi-container {
+    position: relative;
+}
+
+.roi-canvas {
     position: absolute;
     top: 0;
     left: 0;
-    width: 100%;
-    height: 100%;
-    border-radius: 4px;
+    cursor: crosshair;
 }
 
-#tracking-overlay {
+/* Progress Bar */
+.progress-container {
+    width: 100%;
+    background-color: var(--gray-light);
+    border-radius: 999px;
+    overflow: hidden;
+    height: 0.5rem;
+}
+
+.progress-bar {
+    height: 100%;
+    background: var(--premium-gradient);
+    border-radius: 999px;
+    transition: width 0.5s ease-in-out;
+}
+
+/* Status Messages */
+.status-message {
+    font-size: 0.875rem;
+    color: var(--gray-dark);
+}
+
+.status-success { color: var(--success); }
+.status-error { color: var(--danger); }
+.status-info { color: var(--info); }
+.status-warning { color: var(--warning); }
+
+/* Analytics */
+.analytics-card {
+    background: white;
+    border-radius: var(--border-radius);
+    padding: 1rem;
+    box-shadow: var(--shadow);
+    transition: transform var(--transition-speed) ease;
+}
+
+.analytics-card:hover {
+    transform: translateY(-2px);
+}
+
+.heatmap-container img {
+    width: 100%;
+    border-radius: var(--border-radius);
+    transition: transform var(--transition-speed) ease;
+}
+
+.heatmap-container:hover img {
+    transform: scale(1.02);
+}
+
+/* Top Objects */
+.top-objects {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 1rem;
+}
+
+.object-card {
+    border-radius: var(--border-radius);
+    box-shadow: var(--shadow);
+    overflow: hidden;
+}
+
+.object-card img {
+    width: 100%;
+    height: auto;
+    object-fit: cover;
+}
+
+/* Modal */
+.modal {
+    z-index: 1000;
+    background: rgba(0, 0, 0, 0.75);
+    transition: opacity var(--transition-speed) ease;
+}
+
+.modal.active {
+    opacity: 1;
+}
+
+.modal:not(.active) {
+    opacity: 0;
     pointer-events: none;
 }
 
-.tracking-stats {
-    display: flex;
-    justify-content: space-between;
-    margin-top: 1rem;
-    padding: 0.5rem;
-    background-color: var(--dark-color);
-    color: white;
-    border-radius: 4px;
+/* Animations */
+.animate-pulse {
+    animation: pulse 1.5s infinite;
 }
 
-/* Footer */
-footer {
-    text-align: center;
-    padding: 1rem;
-    background-color: var(--dark-color);
-    color: white;
-    margin-top: 2rem;
+@keyframes pulse {
+    0% { opacity: 1; }
+    50% { opacity: 0.5; }
+    100% { opacity: 1; }
+}
+
+.animate-fade-in {
+    animation: fadeIn 0.5s ease-in-out;
+}
+
+@keyframes fadeIn {
+    0% { opacity: 0; }
+    100% { opacity: 1; }
 }
 
 /* Responsive Design */
 @media (max-width: 768px) {
-    .download-options {
-        flex-direction: column;
+    header {
+        padding: 1.5rem;
     }
-    
-    .download-options button {
-        margin: 0.5rem 0;
+    section {
+        padding: 1.5rem;
     }
-    
-    .camera-controls {
-        flex-direction: column;
-        align-items: flex-start;
+    .top-objects {
+        grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
     }
-    
-    .camera-controls select, .camera-controls button {
-        margin: 0.5rem 0;
-        width: 100%;
+}
+
+@media (max-width: 640px) {
+    :root {
+        --border-radius: 0.375rem;
     }
-} 
+    .video-container {
+        margin: 0 -1rem;
+        border-radius: 0;
+    }
+}
+
+/* Accessibility */
+:focus {
+    outline: 2px solid var(--secondary);
+    outline-offset: 2px;
+}

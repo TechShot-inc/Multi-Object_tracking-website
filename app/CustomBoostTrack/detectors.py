@@ -24,38 +24,24 @@ class Detector(ABC):
     def __call__(self, img):
         pass
 
-# class YoloDetector:
-#     def __init__(self, yolo_path, conf=None):
-#         self.model = YOLO(yolo_path)
-#         self.conf = conf
-#         self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
-#         self.model.to(self.device)
 
-#     def __call__(self, img):
-#         results = self.model(img, conf=self.conf, device=self.device)[0]
-#         boxes = results.boxes.xyxy
-#         scores = results.boxes.conf
-#         # Move to CPU for NMS
-#         boxes_cpu = boxes.cpu()
-#         scores_cpu = scores.cpu()
-#         iou_thres = 0.45
-#         keep = torchvision.ops.nms(boxes_cpu, scores_cpu, iou_thres)
-#         # Combine boxes and scores for output
-#         filtered_boxes = boxes[keep].cpu().numpy()
-#         filtered_scores = scores[keep].cpu().numpy()
-#         # Concatenate boxes and scores (shape: [N, 5])
-#         dets = torch.cat((torch.tensor(filtered_boxes), torch.tensor(filtered_scores).unsqueeze(1)), dim=1).numpy()
-#         return dets
 class YoloDetector(Detector):
     def __init__(self, yolo_path, conf = None):
         self.model = YOLO(yolo_path)
         self.conf = conf
 
     def __call__(self, img):
+        # Ensure image is in RGB format for YOLO
+        if img.shape[2] == 3:
+            img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        else:
+            img_rgb = img
+
         if self.conf:
-            results = self.model(img, conf = self.conf)[0] 
+            results = self.model(img_rgb, conf=self.conf)[0]
         else:   
-            results = self.model(img)[0]  # Let Ultralytics scale to input resolution
+            results = self.model(img_rgb)[0]  # Let Ultralytics scale to input resolution
+
         annotations = []
         for box in results.boxes:
             if int(box.cls) == 0:  # Only keep 'person' class (class ID 0)

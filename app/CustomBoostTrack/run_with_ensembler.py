@@ -17,6 +17,12 @@ import torch
 
 from detectors import *
 
+def ensure_dir(directory):
+    """Ensure directory exists, creating it if necessary."""
+    if not os.path.exists(directory):
+        os.makedirs(directory, exist_ok=True)
+        print(f"Created directory: {directory}")
+
 """
 Script modified from Deep OC-SORT: 
 https://github.com/GerardMaggiolino/Deep-OC-SORT
@@ -397,17 +403,30 @@ def main():
 
         print(f"Linear interpolation post-processing applied, saved to {post_folder_data}.")
 
-        post_folder_gbi = os.path.join(args.result_folder, args.exp_name + "_post_gbi", "data")
-        vis_folder_gbi = os.path.join(args.result_folder, args.exp_name + "_post_gbi", "visualizations") if args.visualize else None
-        if args.visualize:
-            os.makedirs(vis_folder_gbi, exist_ok=True)
+        # Create full path for GBI results
+        post_folder_gbi_root = os.path.join(args.result_folder, args.exp_name + "_post_gbi")
+        post_folder_gbi = os.path.join(post_folder_gbi_root, "data")
         
-        if not os.path.exists(post_folder_gbi):
-            os.makedirs(post_folder_gbi)
+        # Ensure GBI folders exist
+        ensure_dir(post_folder_gbi_root)
+        ensure_dir(post_folder_gbi)
+        
+        # Set up visualization folder if needed
+        vis_folder_gbi = os.path.join(post_folder_gbi_root, "visualizations") if args.visualize else None
+        if args.visualize:
+            ensure_dir(vis_folder_gbi)
+        
+        # Process each file
         for file_name in os.listdir(post_folder_data):
             in_path = os.path.join(post_folder_data, file_name)
             out_path2 = os.path.join(post_folder_gbi, file_name)
+            
+            # Ensure the parent directory of each file exists
+            ensure_dir(os.path.dirname(out_path2))
+            
+            # Run GBI
             GBInterpolation(path_in=in_path, path_out=out_path2, interval=args.interval)
+            
         print(f"Gradient boosting interpolation post-processing applied, saved to {post_folder_gbi}.")
         
         # Visualize GBI tracks

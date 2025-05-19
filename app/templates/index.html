@@ -1,227 +1,449 @@
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Multi-Object Tracking Solution</title>
+    <title>Advanced Multi-Object Tracking Solution</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jsPDF/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
-    <!-- Remove TensorFlow.js, COCO-SSD, KalmanJS -->
+    <!-- Modern Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
 </head>
-
-<body>
-    <header>
-        <h1>Multi-Object Tracking Solution</h1>
-        <nav>
-            <ul>
-                <li><a href="#video-upload">Video Upload</a></li>
-                <li><a href="#real-time-tracking">Real-Time Tracking</a></li>
-            </ul>
-        </nav>
+<body class="bg-gray-50 font-sans antialiased">
+    <header class="bg-gradient-to-r from-blue-900 to-blue-700 text-white py-6 shadow-lg">
+        <div class="container mx-auto px-4">
+            <h1 class="text-4xl font-bold tracking-tight">Multi-Object Tracking</h1>
+            <nav class="mt-4 flex space-x-4">
+                <a href="#upload-section" onclick="showSection('upload-section')" class="px-4 py-2 text-lg font-medium hover:bg-blue-600 rounded-lg transition">Video Upload</a>
+                <a href="#realtime-section" onclick="showSection('realtime-section')" class="px-4 py-2 text-lg font-medium hover:bg-blue-600 rounded-lg transition">Real-Time Tracking</a>
+            </nav>
+        </div>
     </header>
 
-    <main>
-        <section id="video-upload">
-            <h2>Video Upload</h2>
-            <p>Upload a video file to process with our tracking solution.</p>
-
-            <form id="upload-form" enctype="multipart/form-data">
-                <div class="file-input-container">
-                    <input type="file" id="video-file" name="video" accept="video/mp4,video/avi,video/mov,video/mkv">
-                    <label for="video-file">Choose a video file</label>
+    <main class="container mx-auto px-4 py-10">
+        <!-- Video Upload Section -->
+        <section id="upload-section" class="bg-white p-8 rounded-xl shadow-xl">
+            <h2 class="text-2xl font-semibold text-blue-900 mb-6">Upload Video</h2>
+            <form id="upload-form" enctype="multipart/form-data" class="space-y-6">
+                <div>
+                    <label for="video-file" class="block text-sm font-medium text-gray-700">Select Video</label>
+                    <input type="file" id="video-file" name="video" accept="video/*" required class="mt-1 block w-full border-gray-300 rounded-lg shadow-sm focus:ring-teal-500 focus:border-teal-500">
                 </div>
-                <div class="form-group">
-                    <label for="speed">Frame Extraction Speed (1 = every frame, 5 = every 5th frame):</label>
-                    <input type="number" id="speed" name="speed" min="1" max="30" value="5" required>
+                <div>
+                    <label for="speed" class="block text-sm font-medium text-gray-700">Processing Speed</label>
+                    <div class="flex items-center gap-2">
+                        <input type="range" id="speed" name="speed" value="5" min="1" max="10" step="1" 
+                            class="mt-1 block w-full accent-teal-500" oninput="document.getElementById('speed-value').textContent = this.value + 'x'">
+                        <span id="speed-value" class="text-sm text-gray-600 min-w-[3em]">5x</span>
+                    </div>
+                    <p class="mt-1 text-sm text-gray-500">Faster processing = lower quality tracking</p>
                 </div>
-                <div class="form-group">
-                    <label for="output_speed">Output Video Speed Multiplier (1 = normal, 2 = 2x faster):</label>
-                    <input type="number" id="output_speed" name="output_speed" min="1" max="10" value="2" required>
+                <div>
+                    <label for="output-speed" class="block text-sm font-medium text-gray-700">Output Playback Speed</label>
+                    <div class="flex items-center gap-2">
+                        <input type="range" id="output-speed" name="output-speed" value="1" min="0.25" max="4" step="0.25" 
+                            class="mt-1 block w-full accent-teal-500" oninput="document.getElementById('output-speed-value').textContent = this.value + 'x'">
+                        <span id="output-speed-value" class="text-sm text-gray-600 min-w-[3em]">1x</span>
+                    </div>
                 </div>
-                <button type="submit" id="upload-button">Upload & Process</button>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Region of Interest (ROI)</label>
+                    <p class="text-sm text-gray-500">Click and drag on the video preview to select an ROI.</p>
+                    <div class="mt-2 flex space-x-3">
+                        <button type="button" id="select-roi-upload" onclick="startRoiSelection('upload')" class="px-4 py-2 bg-teal-500 text-white rounded-lg hover:bg-teal-600 transition">Select ROI</button>
+                        <button type="button" id="clear-roi-upload" onclick="clearRoi('upload')" disabled class="px-4 py-2 bg-gray-300 text-gray-700 rounded-lg">Clear ROI</button>
+                    </div>
+                    <div id="roi-container-upload" class="roi-container mt-4 hidden relative">
+                        <video id="upload-preview" controls class="w-full rounded-lg"></video>
+                        <canvas id="roi-canvas-upload" class="w-full h-full absolute top-0 left-0 rounded-lg"></canvas>
+                        <p id="roi-instruction" class="text-sm absolute bottom-2 right-2 bg-black bg-opacity-70 text-white py-1 px-3 rounded">Upload a video to select ROI.</p>
+                    </div>
+                </div>
+                <button type="submit" id="upload-button" class="px-6 py-2 bg-blue-900 text-white rounded-lg hover:bg-blue-800 transition">Upload and Process</button>
             </form>
-            
-            <div id="upload-status" class="status-container">
-                <div class="status-message"></div>
-                <div class="progress-container">
-                    <div class="progress-bar"></div>
-                </div>
-            </div>
-            
-            <div id="results-container" style="display: none;">
-                <h3>Results</h3>
-                <div class="video-result">
-                    <h4>Processed Video</h4>
-                    <video id="result-video" controls></video>
-                </div>
-                <div class="download-options">
-                    <button id="download-video">Download Annotated Video</button>
-                    <button id="download-annotations">Download Annotations</button>
+            <div id="upload-status" class="mt-6">
+                <p class="status-message text-gray-600">Ready to upload</p>
+                <div class="w-full bg-gray-200 rounded-full h-2.5 mt-2">
+                    <div class="progress-bar bg-teal-500 h-2.5 rounded-full" style="width: 0%;" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>
                 </div>
             </div>
         </section>
 
-        <section id="real-time-tracking">
-            <h2>Real-Time Tracking</h2>
-            <p>Use your device's camera for real-time object tracking.</p>
-
-            <div class="camera-controls">
-                <button id="start-tracking">Start Tracking</button>
-                <button id="stop-tracking" disabled>Stop Tracking</button>
+        <!-- Real-Time Tracking Section -->
+        <section id="realtime-section" class="bg-white p-8 rounded-xl shadow-xl hidden">
+            <h2 class="text-2xl font-semibold text-blue-900 mb-6">Real-Time Tracking</h2>
+            <div class="mb-6">
+                <label class="block text-sm font-medium text-gray-700">Region of Interest (ROI)</label>
+                <p class="text-sm text-gray-500">Click and drag on the video to select an ROI, then start tracking.</p>
+                <div class="mt-2 flex space-x-3">
+                    <button type="button" id="select-roi-realtime" onclick="startRoiSelection('realtime')" class="px-4 py-2 bg-teal-500 text-white rounded-lg hover:bg-teal-600 transition">Select ROI</button>
+                    <button type="button" id="clear-roi-realtime" onclick="clearRoi('realtime')" disabled class="px-4 py-2 bg-gray-300 text-gray-700 rounded-lg">Clear ROI</button>
+                </div>
+                <div class="relative mt-4">
+                    <video id="realtime-video" autoplay class="w-full rounded-lg shadow-sm"></video>
+                    <canvas id="roi-canvas-realtime" class="absolute top-0 left-0 w-full h-full"></canvas>
+                    <div id="realtime-loading" class="absolute inset-0 flex items-center justify-center bg-black bg-opacity-50 hidden">
+                        <svg class="animate-spin h-8 w-8 text-teal-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                    </div>
+                </div>
             </div>
-
-            <div class="video-container">
-                <video id="camera-feed" autoplay muted playsinline style="display:none;"></video>
-                <canvas id="tracking-overlay"></canvas>
+            <div class="flex space-x-3">
+                <button id="start-tracking" onclick="startTracking()" class="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition">Start Tracking</button>
+                <button id="stop-tracking" onclick="stopTracking()" disabled class="px-6 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition">Stop Tracking</button>
             </div>
-
-            <div class="tracking-stats">
-                <div>Detected Objects: <span id="object-count">0</span></div>
-                <div>FPS: <span id="fps">0</span></div>
+            <div id="realtime-status" class="mt-6">
+                <p class="status-message text-gray-600">Ready to start tracking</p>
             </div>
         </section>
-        
-        <!-- Optional: Alternative HTML5 Player Section -->
-        <section id="html5-player" style="display: none;">
-            <h2>HTML5 Video Player</h2>
-            <p>If the regular video player doesn't work, you can use this alternative player.</p>
-            
-            <div class="player-container">
-                <video id="alt-player" controls>
-                    <source id="alt-player-source" src="" type="video/mp4">
-                    Your browser does not support the video tag.
-                </video>
+
+        <!-- Results Section -->
+        <section id="results-container" class="bg-white p-8 rounded-xl shadow-xl hidden">
+            <h2 class="text-2xl font-semibold text-blue-900 mb-6">Tracking Results</h2>
+            <video id="result-video" controls class="w-full rounded-lg shadow-sm"></video>
+            <div class="mt-6 flex space-x-3">
+                <button id="replay-video" class="px-4 py-2 bg-blue-900 text-white rounded-lg hover:bg-blue-800 transition">Replay</button>
+                <button id="download-video" class="px-4 py-2 bg-blue-900 text-white rounded-lg hover:bg-blue-800 transition">Download Video</button>
+                <button id="download-annotations" class="px-4 py-2 bg-blue-900 text-white rounded-lg hover:bg-blue-800 transition">Download Annotations</button>
             </div>
-            
-            <div class="player-controls">
-                <button onclick="document.getElementById('alt-player').play()">Play</button>
-                <button onclick="document.getElementById('alt-player').pause()">Pause</button>
-                <button onclick="document.getElementById('alt-player').currentTime = 0">Restart</button>
-                <button onclick="toggleFullScreen('alt-player')">Fullscreen</button>
+        </section>
+
+        <!-- Analytics Section -->
+        <section id="analytics-section" class="bg-white p-8 rounded-xl shadow-xl hidden">
+            <h2 class="text-2xl font-semibold text-blue-900 mb-6">Analytics</h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                    <h3 class="text-lg font-medium text-gray-800">Density Heatmap</h3>
+                    <img id="heatmap-image" alt="Density Heatmap" class="w-full rounded-lg shadow-sm">
+                    <p id="heatmap-info" class="text-sm text-gray-600 mt-2">Hover for cell details.</p>
+                </div>
+                <div>
+                    <h3 class="text-lg font-medium text-gray-800">Velocity Heatmap</h3>
+                    <img id="velocity-heatmap-image" alt="Velocity Heatmap" class="w-full rounded-lg shadow-sm">
+                    <p id="velocity-heatmap-info" class="text-sm text-gray-600 mt-2">Hover for speed details.</p>
+                </div>
+                <div>
+                    <h3 class="text-lg font-medium text-gray-800">Object Count Over Time</h3>
+                    <canvas id="object-count-chart" class="w-full"></canvas>
+                </div>
+                <div>
+                    <h3 class="text-lg font-medium text-gray-800">Track Duration Distribution</h3>
+                    <canvas id="track-duration-chart" class="w-full"></canvas>
+                </div>
+                <div>
+                    <h3 class="text-lg font-medium text-gray-800">Top Tracked Objects</h3>
+                    <div id="top-ids-container" class="space-y-4"></div>
+                </div>
+                <div>
+                    <h3 class="text-lg font-medium text-gray-800">Average Velocity</h3>
+                    <p class="text-gray-600"><span id="avg-velocity">0</span> px/frame</p>
+                </div>
             </div>
+            <button id="download-report" class="mt-6 px-6 py-2 bg-blue-900 text-white rounded-lg hover:bg-blue-800 transition">Download Report</button>
         </section>
     </main>
 
-    <footer>
-        <p>&copy; 2023 Multi-Object Tracking Solution</p>
-    </footer>
+    <!-- Modal for Errors -->
+    <div id="modal" class="fixed inset-0 bg-gray-800 bg-opacity-75 flex items-center justify-center hidden">
+        <div class="bg-white p-8 rounded-xl shadow-2xl max-w-md w-full">
+            <p id="modal-message" class="text-gray-700 text-lg"></p>
+            <button class="mt-6 px-4 py-2 bg-blue-900 text-white rounded-lg hover:bg-blue-800 transition" onclick="document.getElementById('modal').style.display='none'">Close</button>
+        </div>
+    </div>
 
-    <!-- Load custom scripts -->
-    <script src="{{ url_for('static', filename='js/upload.js') }}"></script>
     <script>
-    // Real-time tracking via backend
-    const startBtn = document.getElementById('start-tracking');
-    const stopBtn = document.getElementById('stop-tracking');
-    const video = document.getElementById('camera-feed');
-    const canvas = document.getElementById('tracking-overlay');
-    const ctx = canvas.getContext('2d');
-    const objectCountElement = document.getElementById('object-count');
-    const fpsElement = document.getElementById('fps');
-    let streaming = false;
-    let stream = null;
-    let lastFrameTime = 0;
+        let roiUpload = null;
+        let roiRealtime = null;
+        let isSelectingRoi = false;
+        let roiStart = null;
+        let isTracking = false;
+        let videoElement, canvasElement, ctx;
 
-    startBtn.onclick = async function() {
-        if (streaming) return;
-        stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 } });
-        video.srcObject = stream;
-        await video.play();
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
-        streaming = true;
-        startBtn.disabled = true;
-        stopBtn.disabled = false;
-        sendFrameLoop();
-    };
-
-    stopBtn.onclick = function() {
-        streaming = false;
-        startBtn.disabled = false;
-        stopBtn.disabled = true;
-        if (stream) {
-            stream.getTracks().forEach(track => track.stop());
-            stream = null;
+        function showSection(sectionId) {
+            console.log(`Showing section: ${sectionId}`);
+            document.querySelectorAll('main > section').forEach(section => {
+                section.classList.toggle('hidden', section.id !== sectionId);
+            });
+            if (sectionId === 'realtime-section' && !isTracking) {
+                initializeWebcam();
+            }
         }
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        objectCountElement.textContent = '0';
-        fpsElement.textContent = '0';
-    };
 
-    async function sendFrameLoop() {
-        if (!streaming) return;
-        // Draw current frame to an offscreen canvas
-        const offCanvas = document.createElement('canvas');
-        offCanvas.width = video.videoWidth;
-        offCanvas.height = video.videoHeight;
-        const offCtx = offCanvas.getContext('2d');
-        offCtx.drawImage(video, 0, 0, offCanvas.width, offCanvas.height);
-        // Get image data as blob
-        offCanvas.toBlob(async function(blob) {
-            if (!streaming) return;
+        function initializeWebcam() {
+            console.log('Webcam initialization deferred to start tracking');
+        }
+
+        function startRoiSelection(mode) {
+            console.log(`Starting ROI selection for ${mode}`);
+            isSelectingRoi = true;
+            const canvas = document.getElementById(`roi-canvas-${mode}`);
+            const video = document.getElementById(mode === 'upload' ? 'upload-preview' : 'realtime-video');
+            canvas.classList.remove('hidden');
+            video.classList.remove('hidden');
+
+            // Set canvas to video's native resolution
+            canvas.width = video.videoWidth || video.offsetWidth;
+            canvas.height = video.videoHeight || video.offsetHeight;
+            canvas.style.width = video.offsetWidth + 'px';
+            canvas.style.height = video.offsetHeight + 'px';
+
+            canvasElement = canvas;
+            ctx = canvas.getContext('2d');
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            if (mode === 'upload') {
+                const fileInput = document.getElementById('video-file');
+                if (fileInput.files.length > 0) {
+                    video.src = URL.createObjectURL(fileInput.files[0]);
+                    video.onloadedmetadata = () => {
+                        canvas.width = video.videoWidth;
+                        canvas.height = video.videoHeight;
+                        canvas.style.width = video.offsetWidth + 'px';
+                        canvas.style.height = video.offsetHeight + 'px';
+                        ctx.clearRect(0, 0, canvas.width, canvas.height);
+                        video.play().catch(e => console.error('Video play error:', e));
+                    };
+                } else {
+                    showModal('Please select a video file first.');
+                    isSelectingRoi = false;
+                    return;
+                }
+            } else {
+                initializeWebcam();
+            }
+            document.getElementById(`select-roi-${mode}`).disabled = true;
+            document.getElementById(`clear-roi-${mode}`).disabled = false;
+        }
+
+        function clearRoi(mode) {
+            console.log(`Clearing ROI for ${mode}`);
+            const canvas = document.getElementById(`roi-canvas-${mode}`);
+            const ctx = canvas.getContext('2d');
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            if (mode === 'upload') {
+                roiUpload = null;
+                document.getElementById('upload-preview').classList.add('hidden');
+            } else {
+                roiRealtime = null;
+            }
+            document.getElementById(`select-roi-${mode}`).disabled = false;
+            document.getElementById(`clear-roi-${mode}`).disabled = true;
+        }
+
+        function drawRoi(x1, y1, x2, y2) {
+            if (!ctx) return;
+            // Clear the canvas
+            ctx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+            // Draw the video frame
+            const video = document.getElementById(canvasElement.id === 'roi-canvas-upload' ? 'upload-preview' : 'realtime-video');
+            ctx.drawImage(video, 0, 0, canvasElement.width, canvasElement.height);
+            // Draw the ROI box
+            ctx.fillStyle = 'rgba(0, 196, 180, 0.3)';
+            ctx.strokeStyle = '#2DD4BF';
+            ctx.lineWidth = 3;
+            ctx.fillRect(x1, y1, x2 - x1, y2 - y1);
+            ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
+        }
+
+        document.addEventListener('mousedown', (e) => {
+            if (isSelectingRoi && canvasElement) {
+                const rect = canvasElement.getBoundingClientRect();
+                const scaleX = canvasElement.width / rect.width;
+                const scaleY = canvasElement.height / rect.height;
+                roiStart = {
+                    x: (e.clientX - rect.left) * scaleX,
+                    y: (e.clientY - rect.top) * scaleY
+                };
+                console.log(`ROI selection started at (${roiStart.x}, ${roiStart.y})`);
+            }
+        });
+
+        document.addEventListener('mousemove', (e) => {
+            if (isSelectingRoi && roiStart && canvasElement) {
+                const rect = canvasElement.getBoundingClientRect();
+                const scaleX = canvasElement.width / rect.width;
+                const scaleY = canvasElement.height / rect.height;
+                const x = (e.clientX - rect.left) * scaleX;
+                const y = (e.clientY - rect.top) * scaleY;
+                drawRoi(roiStart.x, roiStart.y, x, y);
+            }
+        });
+
+        document.addEventListener('mouseup', (e) => {
+            if (isSelectingRoi && roiStart && canvasElement) {
+                const rect = canvasElement.getBoundingClientRect();
+                const scaleX = canvasElement.width / rect.width;
+                const scaleY = canvasElement.height / rect.height;
+                const x = (e.clientX - rect.left) * scaleX;
+                const y = (e.clientY - rect.top) * scaleY;
+                const roi = {
+                    x: Math.min(roiStart.x, x),
+                    y: Math.min(roiStart.y, y),
+                    width: Math.abs(x - roiStart.x),
+                    height: Math.abs(y - roiStart.y)
+                };
+                if (roi.width < 20 || roi.height < 20) {
+                    showModal('ROI is too small. Please select a larger area.');
+                    clearRoi(canvasElement.id.includes('upload') ? 'upload' : 'realtime');
+                    return;
+                }
+                if (canvasElement.id === 'roi-canvas-upload') {
+                    roiUpload = roi;
+                } else {
+                    roiRealtime = roi;
+                }
+                console.log(`ROI selected: ${JSON.stringify(roi)}`);
+                isSelectingRoi = false;
+                roiStart = null;
+                // Draw final ROI
+                drawRoi(roi.x, roi.y, roi.x + roi.width, roi.y + roi.height);
+            }
+        });
+
+        function showModal(message) {
+            console.log('Showing modal:', message);
+            document.getElementById('modal-message').textContent = message;
+            document.getElementById('modal').classList.remove('hidden');
+        }
+
+        function startTracking() {
+            console.log('Start Tracking clicked');
+            if (isTracking) return;
+            
+            const video = document.getElementById('realtime-video');
+            document.getElementById('realtime-loading').classList.remove('hidden');
+            document.getElementById('start-tracking').disabled = true;
+            
+            console.log('Initializing webcam');
+            navigator.mediaDevices.getUserMedia({ video: true })
+                .then(stream => {
+                    console.log('Webcam initialized');
+                    video.srcObject = stream;
+                    video.onloadedmetadata = () => {
+                        const canvas = document.getElementById('roi-canvas-realtime');
+                        canvas.width = video.videoWidth;
+                        canvas.height = video.videoHeight;
+                        canvas.style.width = video.offsetWidth + 'px';
+                        canvas.style.height = video.offsetHeight + 'px';
+                        video.play().catch(e => console.error('Video play error:', e));
+                        setTimeout(() => beginTracking(), 500);
+                    };
+                })
+                .catch(err => {
+                    console.error('Webcam error:', err);
+                    showModal('Failed to access webcam: ' + err.message);
+                    document.getElementById('start-tracking').disabled = false;
+                    document.getElementById('realtime-loading').classList.add('hidden');
+                });
+        }
+        
+        function beginTracking() {
+            console.log('Beginning tracking');
+            isTracking = true;
+            document.getElementById('start-tracking').disabled = true;
+            document.getElementById('stop-tracking').disabled = false;
+            document.getElementById('realtime-status').querySelector('.status-message').textContent = 'Tracking...';
+            document.getElementById('realtime-status').classList.add('animate-pulse');
+            document.getElementById('realtime-loading').classList.add('hidden');
+            sendFrameLoop();
+        }
+        
+        function stopTracking() {
+            console.log('Stop Tracking clicked');
+            isTracking = false;
+            document.getElementById('start-tracking').disabled = false;
+            document.getElementById('stop-tracking').disabled = true;
+            document.getElementById('realtime-status').querySelector('.status-message').textContent = 'Ready to start tracking';
+            document.getElementById('realtime-status').classList.remove('animate-pulse');
+            
+            const video = document.getElementById('realtime-video');
+            if (video.srcObject) {
+                video.srcObject.getTracks().forEach(track => track.stop());
+                video.srcObject = null;
+            }
+            
+            const canvas = document.getElementById('roi-canvas-realtime');
+            const ctx = canvas.getContext('2d');
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+        }
+
+        async function sendFrameLoop() {
+            if (!isTracking) {
+                console.log('Tracking stopped');
+                return;
+            }
+            const video = document.getElementById('realtime-video');
+            if (!video.videoWidth || !video.videoHeight) {
+                console.log('Video not ready, retrying');
+                setTimeout(sendFrameLoop, 100);
+                return;
+            }
+            const canvas = document.createElement('canvas');
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.8));
+            console.log(`Captured frame, size: ${blob.size} bytes`);
             const formData = new FormData();
             formData.append('frame', blob, 'frame.jpg');
-            const t0 = performance.now();
+            if (roiRealtime) {
+                // Send ROI in relative coordinates (0-1)
+                const relativeRoi = {
+                    x: roiRealtime.x / video.videoWidth,
+                    y: roiRealtime.y / video.videoHeight,
+                    width: roiRealtime.width / video.videoWidth,
+                    height: roiRealtime.height / video.videoHeight
+                };
+                console.log(`Sending ROI: ${JSON.stringify(relativeRoi)}`);
+                formData.append('roi', JSON.stringify(relativeRoi));
+            }
             try {
+                console.log('Sending frame to /realtime-track');
                 const response = await fetch('/realtime-track', {
                     method: 'POST',
                     body: formData
                 });
-                if (response.ok) {
-                    const result = await response.json();
-                    // Draw annotated image
-                    const img = new window.Image();
-                    img.onload = function() {
-                        ctx.clearRect(0, 0, canvas.width, canvas.height);
-                        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-                    };
-                    img.src = 'data:image/jpeg;base64,' + result.annotated;
-                    // Update stats
-                    objectCountElement.textContent = result.count;
-                    const t1 = performance.now();
-                    const fps = (1000 / (t1 - lastFrameTime)).toFixed(1);
-                    fpsElement.textContent = fps;
-                    lastFrameTime = t1;
+                const data = await response.json();
+                console.log('Response:', data);
+                if (data.error) {
+                    console.error('Tracking error:', data.error);
+                    showModal(data.error);
+                    stopTracking();
+                    return;
                 }
-            } catch (e) {
-                // Optionally show error
+                const annotatedImg = new Image();
+                annotatedImg.src = `data:image/jpeg;base64,${data.annotated}`;
+                annotatedImg.onload = () => {
+                    const canvas = document.getElementById('roi-canvas-realtime');
+                    const ctx = canvas.getContext('2d');
+                    canvas.width = video.videoWidth;
+                    canvas.height = video.videoHeight;
+                    canvas.style.width = video.offsetWidth + 'px';
+                    canvas.style.height = video.offsetHeight + 'px';
+                    ctx.drawImage(annotatedImg, 0, 0, canvas.width, canvas.height);
+                    if (roiRealtime) {
+                        ctx.fillStyle = 'rgba(0, 196, 180, 0.3)';
+                        ctx.strokeStyle = '#2DD4BF';
+                        ctx.lineWidth = 3;
+                        ctx.fillRect(roiRealtime.x, roiRealtime.y, roiRealtime.width, roiRealtime.height);
+                        ctx.strokeRect(roiRealtime.x, roiRealtime.y, roiRealtime.width, roiRealtime.height);
+                    }
+                };
+                document.getElementById('realtime-status').querySelector('.status-message').textContent = `Tracking... (${data.count} objects)`;
+            } catch (err) {
+                console.error('Fetch error:', err);
+                showModal('Server error: ' + err.message);
+                stopTracking();
+                return;
             }
-            // Next frame
-            if (streaming) requestAnimationFrame(sendFrameLoop);
-        }, 'image/jpeg', 0.85);
-    }
-    </script>
-    
-    <!-- Additional helper functions -->
-    <script>
-        // Function to toggle fullscreen for HTML5 video player
-        function toggleFullScreen(elementId) {
-            const video = document.getElementById(elementId);
-            if (!document.fullscreenElement) {
-                if (video.requestFullscreen) {
-                    video.requestFullscreen();
-                } else if (video.webkitRequestFullscreen) { /* Safari */
-                    video.webkitRequestFullscreen();
-                } else if (video.msRequestFullscreen) { /* IE11 */
-                    video.msRequestFullscreen();
-                }
-            } else {
-                if (document.exitFullscreen) {
-                    document.exitFullscreen();
-                } else if (document.webkitExitFullscreen) { /* Safari */
-                    document.webkitExitFullscreen();
-                } else if (document.msExitFullscreen) { /* IE11 */
-                    document.msExitFullscreen();
-                }
-            }
-        }
-        
-        // Function to show alternative player if needed
-        function showAltPlayer(videoUrl) {
-            document.getElementById('html5-player').style.display = 'block';
-            document.getElementById('alt-player-source').src = videoUrl;
-            document.getElementById('alt-player').load();
+            setTimeout(sendFrameLoop, 1000 / 30);
         }
     </script>
+    <script src="{{ url_for('static', filename='js/upload.js') }}"></script>
 </body>
-
 </html>
