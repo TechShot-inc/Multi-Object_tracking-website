@@ -34,3 +34,13 @@ from .video import *
 def index():
     """Render the main page."""
     return render_template('index.html')
+
+@app.route('/video')
+def video():
+    """Render the video tracking page."""
+    return render_template('video.html')
+
+@app.route('/realtime')
+def realtime():
+    """Render the real-time tracking page."""
+    return render_template('realtime.html')

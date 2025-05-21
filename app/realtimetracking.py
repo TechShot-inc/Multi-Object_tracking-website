@@ -8,7 +8,6 @@ from datetime import datetime
 import torch
 from app.CustomBoostTrack.realtime_ensembling import RealTimeTracker
 
-
 # Directory setup
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(APP_DIR)
@@ -34,14 +33,17 @@ class RealTimeTrackingService:
         self.APP_DIR = os.path.dirname(os.path.abspath(__file__))
         self.PROJECT_ROOT = os.path.dirname(self.APP_DIR)
         self.reid_path = os.path.join(self.APP_DIR, "models", "osnet_ain_ms_m_c.pth.tar")
-        self.model1_path = os.path.join(self.APP_DIR, "models", "YOLO11.pt")
-        self.model2_path = os.path.join(self.APP_DIR, "models", "YOLO12.pt")
+        self.model1_path = os.path.join(self.APP_DIR, "models", "General2.pt")
+        self.model2_path = os.path.join(self.APP_DIR, "models", "12General1.pt")
         self.frame_rate = frame_rate
         # Load tracker once
         self.tracker = RealTimeTracker(self.model1_path, self.model2_path, self.reid_path, self.frame_rate)
         # Initialize frame counter and tracking state
         self.frame_id = 1
         self.active = False
+        # Line crossing counters
+        self.persons_inside = 0
+        self.persons_outside = 0
         # Color settings for visualization        
         self.colors = [
             (66, 135, 245),   # Premium blue
@@ -54,8 +56,8 @@ class RealTimeTrackingService:
             (233, 30, 99),    # Pink
         ]
             
-    def process_frame(self, frame, roi=None):
-        """Process frame with optional ROI (coordinates can be either absolute or in relative 0-1 range)"""
+    def process_frame(self, frame, roi=None, line=None):
+        """Process frame with optional ROI and line crossing detection."""
         frame_height, frame_width = frame.shape[:2]
         processing_frame = np.ascontiguousarray(frame)
         original_frame = frame.copy()
@@ -64,117 +66,156 @@ class RealTimeTrackingService:
         if not self.active:
             self.frame_id = 1
             self.active = True
+            self.persons_inside = 0
+            self.persons_outside = 0
         else:
             self.frame_id += 1
     
         # Handle ROI if provided
         roi_applied = False
-        x, y, w, h = 0, 0, 0, 0
+        x_roi, y_roi, w_roi, h_roi = 0, 0, frame_width, frame_height
         
         if roi and isinstance(roi, dict) and all(k in roi for k in ['x', 'y', 'width', 'height']):
             try:
-                # Check if coordinates appear to be relative (all values <= 1.0)
                 is_relative = all(0 <= float(roi[k]) <= 1.0 for k in ['x', 'y', 'width', 'height'])
-                
                 if is_relative:
-                    # Convert relative coordinates (0-1) to absolute pixels
-                    x = int(float(roi['x']) * frame_width)
-                    y = int(float(roi['y']) * frame_height)
-                    w = int(float(roi['width']) * frame_width)
-                    h = int(float(roi['height']) * frame_height)
+                    x_roi = int(float(roi['x']) * frame_width)
+                    y_roi = int(float(roi['y']) * frame_height)
+                    w_roi = int(float(roi['width']) * frame_width)
+                    h_roi = int(float(roi['height']) * frame_height)
                 else:
-                    # Use absolute coordinates
-                    x = int(float(roi['x']))
-                    y = int(float(roi['y']))
-                    w = int(float(roi['width']))
-                    h = int(float(roi['height']))
+                    x_roi = int(float(roi['x']))
+                    y_roi = int(float(roi['y']))
+                    w_roi = int(float(roi['width']))
+                    h_roi = int(float(roi['height']))
                 
-                # Ensure coordinates are valid
-                x = max(0, min(x, frame_width - 1))
-                y = max(0, min(y, frame_height - 1))
-                w = max(1, min(w, frame_width - x))
-                h = max(1, min(h, frame_height - y))
+                x_roi = max(0, min(x_roi, frame_width - 1))
+                y_roi = max(0, min(y_roi, frame_height - 1))
+                w_roi = max(1, min(w_roi, frame_width - x_roi))
+                h_roi = max(1, min(h_roi, frame_height - y_roi))
                 
-                # Only process ROI if it's large enough
-                min_width = int(frame_width * 0.05)  # 5% of frame width
-                min_height = int(frame_height * 0.05)  # 5% of frame height
+                min_width = int(frame_width * 0.05)
+                min_height = int(frame_height * 0.05)
                 
-                if w >= min_width and h >= min_height:
-                    # Create a contiguous copy of the ROI
-                    processing_frame = np.ascontiguousarray(frame[y:y+h, x:x+w])
+                if w_roi >= min_width and h_roi >= min_height:
+                    processing_frame = np.ascontiguousarray(frame[y_roi:y_roi+h_roi, x_roi:x_roi+w_roi])
                     roi_applied = True
-                    print(f"Processing with ROI: x={x}, y={y}, w={w}, h={h}")
+                    print(f"Processing with ROI: x={x_roi}, y={y_roi}, w={w_roi}, h={h_roi}")
                 else:
-                    print(f"ROI too small (w={w}, h={h}), minimum required: {min_width}x{min_height}")
+                    print(f"ROI too small (w={w_roi}, h={h_roi}), minimum required: {min_width}x{min_height}")
             except Exception as e:
                 print(f"Error applying ROI: {e}")
                 processing_frame = frame
         
         try:
-            # Ensure frame is in BGR format for OpenCV operations
             if processing_frame.shape[2] != 3:
                 print("Warning: Converting frame to BGR format")
                 processing_frame = cv2.cvtColor(processing_frame, cv2.COLOR_RGB2BGR)
             
-            # Pass processing_frame to tracker
             detections = self.tracker.update(processing_frame, self.frame_id, roi=roi)
             
-            # If ROI was applied, adjust coordinates back to original frame
             if roi_applied:
                 for det in detections:
-                    det['x'] += x
-                    det['y'] += y
+                    det['x'] += x_roi
+                    det['y'] += y_roi
+            
+            # Debug detections
+            for det in detections:
+                print(f"Detection: id={det['id']}, class={det.get('class')}, x={det['x']}, y={det['y']}, w={det['width']}, h={det['height']}, conf={det['confidence']}")
+            
+            # Line crossing detection
+            counts = {'inside': self.persons_inside, 'outside': self.persons_outside}
+            print(f"Line data received: {line}")
+            if line and isinstance(line, dict) and all(k in line for k in ['position', 'x']):
+                try:
+                    line_x = int(float(line['x']) * frame_width)
+                    line_x = max(0, min(line_x, frame_width - 1))
+                    position = line['position']
+                    print(f"Line: position={position}, x={line_x}")
+                    
+                    # Reset counts for this frame
+                    inside_count = 0
+                    outside_count = 0
+                    
+                    # Process detections for line crossing
+                    for det in detections:
+                        x, w = det['x'], det['width']
+                        left_edge = x
+                        right_edge = x + w
+                        # Check if detection is a person (assume person if class is None, since YOLO detects person)
+                        det_class = det.get('class')
+                        is_person = det_class is None or det_class == 0 or str(det_class).lower() == 'person'
+                        print(f"Checking detection: id={det['id']}, class={det_class}, is_person={is_person}, left_edge={left_edge}, right_edge={right_edge}")
+                        if is_person:
+                            if position == 'left':
+                                # Inside is left side, outside is right side
+                                if right_edge <= line_x:  # Fully left of line
+                                    inside_count += 1
+                                    print(f"Person fully left of line_x={line_x}, inside_count={inside_count}")
+                                elif left_edge >= line_x:  # Fully right of line
+                                    outside_count += 1
+                                    print(f"Person fully right of line_x={line_x}, outside_count={outside_count}")
+                            else:  # position == 'right'
+                                # Inside is right side, outside is left side
+                                if left_edge >= line_x:  # Fully right of line
+                                    inside_count += 1
+                                    print(f"Person fully right of line_x={line_x}, inside_count={inside_count}")
+                                elif right_edge <= line_x:  # Fully left of line
+                                    outside_count += 1
+                                    print(f"Person fully left of line_x={line_x}, outside_count={outside_count}")
+                        else:
+                            print(f"Skipping non-person detection: id={det['id']}, class={det_class}")
+                    
+                    # Update persistent counts
+                    self.persons_inside = inside_count
+                    self.persons_outside = outside_count
+                    counts = {'inside': self.persons_inside, 'outside': self.persons_outside}
+                    print(f"Updated counts: inside={self.persons_inside}, outside={self.persons_outside}")
+                except Exception as e:
+                    print(f"Error processing line crossing: {e}")
+            else:
+                print("No valid line data for counting")
             
             # Start with clean original frame for drawing
             frame = original_frame.copy()
             
-            # Always draw ROI if coordinates are provided, even during selection
+            # Draw ROI if provided
             if roi and isinstance(roi, dict) and all(k in roi for k in ['x', 'y', 'width', 'height']):
-                # Draw ROI with semi-transparent overlay
                 overlay = frame.copy()
-                # Darken the area outside ROI
                 cv2.rectangle(overlay, (0, 0), (frame_width, frame_height), (0, 0, 0), -1)
-                # Cut out the ROI area
-                cv2.rectangle(overlay, (x, y), (x + w, y + h), (0, 0, 0), -1)
-                # Apply the overlay with transparency
+                cv2.rectangle(overlay, (x_roi, y_roi), (x_roi + w_roi, y_roi + h_roi), (0, 0, 0), -1)
                 alpha = 0.3
                 cv2.addWeighted(overlay, alpha, frame, 1 - alpha, 0, frame)
-                
-                # Draw ROI border with animation effect
                 border_color = self.colors[0]
-                border_thickness = 2
-                # Draw main border
-                cv2.rectangle(frame, (x, y), (x + w, y + h), border_color, border_thickness)
-                
-                # Add ROI label with background
+                cv2.rectangle(frame, (x_roi, y_roi), (x_roi + w_roi, y_roi + h_roi), border_color, 2)
                 label = "Active ROI" if roi_applied else "Selecting ROI"
                 label_size, baseline = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 2)
-                cv2.rectangle(frame, (x, y - label_size[1] - 5), 
-                             (x + label_size[0] + 10, y), border_color, -1)
-                cv2.putText(frame, label, (x + 5, y - 5), 
+                cv2.rectangle(frame, (x_roi, y_roi - label_size[1] - 5), 
+                             (x_roi + label_size[0] + 10, y_roi), border_color, -1)
+                cv2.putText(frame, label, (x_roi + 5, y_roi - 5), 
                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
             
-            # Draw detections with premium styling
+            # Draw line if provided
+            if line and isinstance(line, dict) and all(k in line for k in ['position', 'x']):
+                line_x = int(float(line['x']) * frame_width)
+                cv2.line(frame, (line_x, 0), (line_x, frame_height), (0, 0, 255), 2)
+                label = f"Line: {line['position'].capitalize()}"
+                cv2.putText(frame, label, (line_x + 5, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
+            
+            # Draw detections
             for det in detections:
                 color = self.colors[det['id'] % len(self.colors)]
                 x1, y1 = int(det['x']), int(det['y'])
                 x2, y2 = x1 + int(det['width']), y1 + int(det['height'])
-                
-                # Draw premium bounding box
                 cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
-                
-                # Draw ID and confidence with better styling
                 label = f"ID: {det['id']:d} ({det['confidence']:.2f})"
                 label_size, baseline = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 2)
-                
-                # Draw label background
                 cv2.rectangle(frame, (x1, y1 - label_size[1] - baseline - 2),
                             (x1 + label_size[0] + 2, y1), color, -1)
-                # Draw text in white
                 cv2.putText(frame, label, (x1 + 1, y1 - baseline - 1),
                           cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
             
-            # Add stats overlay at the bottom of frame
+            # Add stats overlay
             stats_height = 40
             stats_margin = 10
             cv2.rectangle(frame, 
@@ -186,7 +227,6 @@ class RealTimeTrackingService:
                          (frame_width - stats_margin, frame_height - stats_margin), 
                          (255, 255, 255), 1)
             
-            # Add text
             objects_text = f"Objects: {len(detections)}"
             frame_text = f"Frame: {self.frame_id}"
             time_text = datetime.now().strftime("%H:%M:%S")
@@ -203,27 +243,24 @@ class RealTimeTrackingService:
                       (frame_width - stats_margin - 100, frame_height - stats_margin - 15),
                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
             
-            return frame, detections
+            return frame, detections, counts
             
         except Exception as e:
             print(f"Error in tracking: {e}")
-            return original_frame, []
+            return original_frame, [], counts
 
 def main(camera_index=0, frame_rate=30, roi=None):
-    # Model paths
     reid_path = os.path.join(APP_DIR, "models", "osnet_ain_ms_m_c.pth.tar")
-    model1_path = os.path.join(APP_DIR, "models", "YOLO11.pt")
-    model2_path = os.path.join(APP_DIR, "models", "YOLO12.pt")
+    model1_path = os.path.join(APP_DIR, "models", "General2.pt")
+    model2_path = os.path.join(APP_DIR, "models", "12General1.pt")
 
     for path in [reid_path, model1_path, model2_path]:
         if not os.path.exists(path):
             print(f"Error: Model file not found at {path}")
             return
 
-    # Initialize tracker
     tracker = RealTimeTracker(model1_path, model2_path, reid_path, frame_rate)
 
-    # Initialize webcam
     cap = cv2.VideoCapture(camera_index)
     if not cap.isOpened():
         print(f"Error: Could not open camera (index {camera_index})")
@@ -236,7 +273,6 @@ def main(camera_index=0, frame_rate=30, roi=None):
         cap.release()
         return
 
-    # Convert ROI list to dictionary
     roi_dict = None
     if roi:
         try:
@@ -259,7 +295,6 @@ def main(camera_index=0, frame_rate=30, roi=None):
             print(f"Error parsing ROI: {e}")
             roi_dict = None
 
-    # Tracking data
     tracking_data = {}
     frame_id = 1
     result_filename = os.path.join(PROJECT_ROOT, 'output', 'results', 'realtime-val', 'BTPP', 'data', 'test.txt')
@@ -274,10 +309,8 @@ def main(camera_index=0, frame_rate=30, roi=None):
                 print("Error: Failed to capture frame")
                 break
 
-            # Resize frame for efficiency
             frame = cv2.resize(frame, (640, 480))
 
-            # Process frame
             original_frame = frame.copy()
             if roi_dict:
                 try:
@@ -303,27 +336,16 @@ def main(camera_index=0, frame_rate=30, roi=None):
 
             tracking_data[str(frame_id)] = detections
 
-            # Draw visualizations
             frame = draw_detections(original_frame, detections)
             
-            # Comment out the window display
-            # cv2.imshow('Real-Time Tracking', frame)
-
             frame_id += 1
             elapsed_time = time.time() - start_time
             fps = 1 / (elapsed_time + 1e-9)
             print(f"Frame {frame_id-1} FPS: {fps:.1f}")
 
-            # Comment out the waitKey
-            # if cv2.waitKey(1) & 0xFF == ord('q'):
-            #     break
-
     finally:
         cap.release()
-        # Comment out destroyAllWindows
-        # cv2.destroyAllWindows()
 
-        # Save annotations on exit
         annotations_path = os.path.join(WORKING_DIR, 'annotations.json')
         try:
             with open(annotations_path, 'w') as f:

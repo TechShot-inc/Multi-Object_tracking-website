@@ -14,19 +14,19 @@ realtime_tracker = RealTimeTrackingService(camera_index=0, frame_rate=30)
 def process_frame(frame, model_paths):
     """Process a single frame with tracking"""
     try:
-        yolo11 = YOLO(model_paths['yolo11'])
-        yolo12 = YOLO(model_paths['yolo12'])
-        results11 = yolo11(frame, conf=0.1)[0]
-        results12 = yolo12(frame, conf=0.1)[0]
+        yolo1 = YOLO(model_paths['yolo1'])
+        yolo2 = YOLO(model_paths['yolo2'])
+        results1 = yolo1(frame, conf=0.1)[0]
+        results2 = yolo2(frame, conf=0.1)[0]
         detections = []
-        for det in results11.boxes.data:
+        for det in results1.boxes.data:
             x1, y1, x2, y2, conf, cls = det
             detections.append({
                 'box': [int(x1), int(y1), int(x2), int(y2)],
                 'confidence': float(conf),
                 'class': int(cls)
             })
-        for det in results12.boxes.data:
+        for det in results2.boxes.data:
             x1, y1, x2, y2, conf, cls = det
             detections.append({
                 'box': [int(x1), int(y1), int(x2), int(y2)],
@@ -84,16 +84,43 @@ def realtime_track():
         except (ValueError, TypeError) as e:
             print(f'Error: Invalid ROI values: {e}')
             return jsonify({'error': f'Invalid ROI values: {str(e)}'}), 400
+    line = None
+    if 'line' in request.form:
+        try:
+            line_data = request.form['line']
+            print(f'Raw line data: {line_data}')
+            line = json.loads(line_data)
+            if not isinstance(line, dict) or not all(k in line for k in ['position', 'x']):
+                print('Error: Invalid line format')
+                return jsonify({'error': 'Invalid line format'}), 400
+            if line['position'] not in ['left', 'right'] or not (0 <= float(line['x']) <= 1):
+                print('Error: Invalid line position or x-coordinate')
+                return jsonify({'error': 'Invalid line position or x-coordinate'}), 400
+            line['x'] = float(line['x'])
+            print(f'Validated line: {line}')
+        except json.JSONDecodeError as e:
+            print(f'Error: Invalid line JSON: {e}')
+            return jsonify({'error': f'Invalid line JSON: {str(e)}'}), 400
+        except (ValueError, TypeError) as e:
+            print(f'Error: Invalid line values: {e}')
+            return jsonify({'error': f'Invalid line values: {str(e)}'}), 400
     try:
-        annotated_frame, detections = realtime_tracker.process_frame(frame, roi=roi)
-        print(f'Processed frame, detections: {len(detections)}')
+        annotated_frame, detections, counts = realtime_tracker.process_frame(frame, roi=roi, line=line)
+        print(f'Processed frame, detections: {len(detections)}, counts: {counts}')
         _, buffer = cv2.imencode('.jpg', annotated_frame)
         encoded_frame = base64.b64encode(buffer).decode('utf-8')
+        model_paths = {
+            'yolo1': realtime_tracker.model1_path,
+            'yolo2': realtime_tracker.model2_path,
+            'reid': realtime_tracker.reid_path
+        }
         return jsonify({
             'annotated': encoded_frame,
             'count': len(detections),
             'timestamp': int(time.time() * 1000),
-            'has_roi': roi is not None
+            'has_roi': roi is not None,
+            'model_paths': model_paths,
+            'counts': counts
         })
     except Exception as e:
         print(f"Error processing frame: {e}")
