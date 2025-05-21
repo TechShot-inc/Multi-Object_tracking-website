@@ -51,7 +51,7 @@ class RealTimeTrackingService:
         ]
         
     def process_frame(self, frame, roi=None):
-        """Process frame with optional ROI (coordinates can be either absolute or in relative 0-1 range)"""
+        """Process frame with optional ROI (coordinates are absolute pixels)"""
         frame_height, frame_width = frame.shape[:2]
         processing_frame = frame.copy()
         original_frame = frame.copy()
@@ -64,17 +64,10 @@ class RealTimeTrackingService:
         x, y, w, h = 0, 0, 0, 0
         if roi and isinstance(roi, dict) and all(k in roi for k in ['x', 'y', 'width', 'height']):
             try:
-                is_relative = all(0 <= float(roi[k]) <= 1.0 for k in ['x', 'y', 'width', 'height'])
-                if is_relative:
-                    x = int(float(roi['x']) * frame_width)
-                    y = int(float(roi['y']) * frame_height)
-                    w = int(float(roi['width']) * frame_width)
-                    h = int(float(roi['height']) * frame_height)
-                else:
-                    x = int(float(roi['x']))
-                    y = int(float(roi['y']))
-                    w = int(float(roi['width']))
-                    h = int(float(roi['height']))
+                x = int(float(roi['x']))
+                y = int(float(roi['y']))
+                w = int(float(roi['width']))
+                h = int(float(roi['height']))
                 x = max(0, min(x, frame_width - 1))
                 y = max(0, min(y, frame_height - 1))
                 w = max(1, min(w, frame_width - x))
@@ -101,11 +94,11 @@ class RealTimeTrackingService:
                 cv2.rectangle(overlay, (x, y), (x + w, y + h), (0, 0, 0), -1)
                 alpha = 0.3
                 cv2.addWeighted(overlay, alpha, frame, 1 - alpha, 0, frame)
-                cv2.rectangle(frame, (x, y), (x + w, y + h), self.colors[0], 2)
+                cv2.rectangle(frame, (x, y), (x + w, y + h), (45, 212, 191), 2)  # Match GUI color #2DD4BF
                 label = "Active ROI"
                 label_size, baseline = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 2)
                 cv2.rectangle(frame, (x, y - label_size[1] - 5), 
-                             (x + label_size[0] + 10, y), self.colors[0], -1)
+                             (x + label_size[0] + 10, y), (45, 212, 191), -1)
                 cv2.putText(frame, label, (x + 5, y - 5), 
                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
             for det in detections:
@@ -216,17 +209,10 @@ def main(video_path, output_path, speed=5, output_speed=1, roi=None):
     x, y, w, h = 0, 0, 0, 0
     if roi and isinstance(roi, dict) and all(k in roi for k in ['x', 'y', 'width', 'height']):
         try:
-            is_relative = all(0 <= float(roi[k]) <= 1.0 for k in ['x', 'y', 'width', 'height'])
-            if is_relative:
-                x = int(float(roi['x']) * frame_width)
-                y = int(float(roi['y']) * frame_height)
-                w = int(float(roi['width']) * frame_width)
-                h = int(float(roi['height']) * frame_height)
-            else:
-                x = int(float(roi['x']))
-                y = int(float(roi['y']))
-                w = int(float(roi['width']))
-                h = int(float(roi['height']))
+            x = int(float(roi['x']))
+            y = int(float(roi['y']))
+            w = int(float(roi['width']))
+            h = int(float(roi['height']))
             x = max(0, min(x, frame_width - 1))
             y = max(0, min(y, frame_height - 1))
             w = max(1, min(w, frame_width - x))
@@ -273,7 +259,10 @@ def main(video_path, output_path, speed=5, output_speed=1, roi=None):
         "--conf_thresh", "0.1"
     ]
     print(f"Tracking command: {' '.join(tracking_command)}")
-    subprocess.run(tracking_command, check=True)
+    try:
+        subprocess.run(tracking_command, check=True)
+    except subprocess.CalledProcessError as e:
+        raise RuntimeError(f"Tracking failed: {e}")
     tracking_results_path = os.path.join(output_folder, "BTPP_post_gbi", "data", "test.txt")
     if not os.path.exists(tracking_results_path):
         found = False
@@ -291,6 +280,8 @@ def main(video_path, output_path, speed=5, output_speed=1, roi=None):
                         break
                 if found:
                     break
+        if not found:
+            raise FileNotFoundError("Tracking results file (test.txt) not found")
     def draw_tracking_results_with_roi(frames_folder_path, annnots_path, annoted_video_path, frame_rate, output_speed):
         images = [os.path.join(frames_folder_path, path) for path in os.listdir(frames_folder_path) if path.endswith('.jpg')]
         images = sorted(images)
@@ -323,10 +314,10 @@ def main(video_path, output_path, speed=5, output_speed=1, roi=None):
                 cv2.rectangle(overlay, (0, 0), (width, height), (0, 0, 0), -1)
                 cv2.rectangle(overlay, (x, y), (x + w, y + h), (0, 0, 0), -1)
                 cv2.addWeighted(overlay, 0.3, img, 0.7, 0, img)
-                cv2.rectangle(img, (x, y), (x + w, y + h), (0, 255, 0), 2)
+                cv2.rectangle(img, (x, y), (x + w, y + h), (45, 212, 191), 2)  # Match GUI color #2DD4BF
                 label = "Active ROI"
                 cv2.putText(img, label, (x + 5, y - 5),
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
             else:
                 img = roi_img
             detections = gt_df[gt_df['frame'] == frame_id]
@@ -361,7 +352,10 @@ def main(video_path, output_path, speed=5, output_speed=1, roi=None):
         video_writer.release()
         print(f"Finished writing video at {annoted_video_path}")
         return tracking_data
-    tracking_data = draw_tracking_results_with_roi(frames_path, tracking_results_path, output_path, frame_rate, output_speed)
+    try:
+        tracking_data = draw_tracking_results_with_roi(frames_path, tracking_results_path, output_path, frame_rate, output_speed)
+    except Exception as e:
+        raise RuntimeError(f"Failed to generate annotated video: {e}")
     annotations_path = os.path.join(result_dir, 'annotations.json')
     final_tracking_data = dict(tracking_data)
     try:
@@ -392,12 +386,15 @@ def main(video_path, output_path, speed=5, output_speed=1, roi=None):
         except:
             with open(annotations_path, 'w') as f:
                 f.write('{"1":[]}')
-    shutil.rmtree(frames_path)
-    shutil.rmtree(output_folder)
+    try:
+        shutil.rmtree(frames_path)
+        shutil.rmtree(output_folder)
+    except Exception as e:
+        print(f"Warning: Failed to clean up temporary folders: {e}")
     return output_path
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Real-time multi-object tracking with webcam")
+    parser = argparse.ArgumentParser(description="Video multi-object tracking")
     parser.add_argument("--video", type=str, required=True, help="Path to the video file")
     parser.add_argument("--output", type=str, required=True, help="Path to the output video file")
     parser.add_argument("--speed", type=float, default=5, help="Frame extraction speed")

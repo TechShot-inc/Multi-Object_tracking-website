@@ -26,29 +26,31 @@ class Detector(ABC):
 
 
 class YoloDetector(Detector):
-    def __init__(self, yolo_path, conf = None):
+    def __init__(self, yolo_path, conf=None):
+        self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        print(f"YoloDetector using device: {self.device}")
+        if self.device == 'cpu':
+            print("Warning: CUDA unavailable, falling back to CPU. Performance will be slower.")
         self.model = YOLO(yolo_path)
         self.conf = conf
 
     def __call__(self, img):
-        # Ensure image is in RGB format for YOLO
         if img.shape[2] == 3:
             img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         else:
             img_rgb = img
-
-        if self.conf:
-            results = self.model(img_rgb, conf=self.conf)[0]
-        else:   
-            results = self.model(img_rgb)[0]  # Let Ultralytics scale to input resolution
-
+        results = self.model(img_rgb, conf=self.conf, device=self.device)[0]
         annotations = []
         for box in results.boxes:
             if int(box.cls) == 0:  # Only keep 'person' class (class ID 0)
                 xyxy = box.xyxy[0].tolist()  # [x_min, y_min, x_max, y_max]
                 conf = box.conf[0].item()
                 annotations.append(xyxy + [conf])
-        return torch.tensor(annotations, dtype=torch.float32) if annotations else torch.zeros((0, 5), dtype=torch.float32)
+        
+        # Create tensor but then ensure it's on CPU before returning
+        # This makes it easier to handle in downstream processing
+        result = torch.tensor(annotations, dtype=torch.float32).to(self.device) if annotations else torch.zeros((0, 5), dtype=torch.float32).to(self.device)
+        return result.cpu()  # Always return CPU tensor to avoid conversion issues
 
 
 # EnsembleDetector remains unchanged as it assumes original resolution inputs
@@ -148,6 +150,10 @@ class EnsembleDetector(Detector):
 
         # Prepare for WBF
         if len(model1_preds) > 0:
+            # Ensure tensor is on CPU before converting to numpy
+            if isinstance(model1_preds, torch.Tensor):
+                if model1_preds.device.type != 'cpu':
+                    model1_preds = model1_preds.cpu()
             yolo_boxes = model1_preds[:, :4].numpy()
             yolo_scores = model1_preds[:, 4].numpy()
             yolo_boxes_normalized = yolo_boxes / np.array([orig_w, orig_h, orig_w, orig_h])
@@ -156,8 +162,12 @@ class EnsembleDetector(Detector):
             yolo_boxes_normalized = np.array([])
             yolo_scores = np.array([])
             yolo_labels = np.array([])
-
+    
         if len(model2_preds) > 0:
+            # Ensure tensor is on CPU before converting to numpy
+            if isinstance(model2_preds, torch.Tensor):
+                if model2_preds.device.type != 'cpu':
+                    model2_preds = model2_preds.cpu()
             other_boxes = model2_preds[:, :4].numpy()
             other_scores = model2_preds[:, 4].numpy()
             other_boxes_normalized = other_boxes / np.array([orig_w, orig_h, orig_w, orig_h])
@@ -194,4 +204,8 @@ class EnsembleDetector(Detector):
         else:
             annotations = torch.zeros((0, 5), dtype=torch.float32)
 
+        # Keep tensor on CPU to avoid device conversion issues later
+        if annotations.device.type != 'cpu':
+            annotations = annotations.cpu()
+        
         return annotations

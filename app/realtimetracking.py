@@ -5,7 +5,9 @@ import argparse
 import numpy as np
 import time
 from datetime import datetime
+import torch
 from app.CustomBoostTrack.realtime_ensembling import RealTimeTracker
+
 
 # Directory setup
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -51,7 +53,7 @@ class RealTimeTrackingService:
             (33, 150, 243),   # Blue
             (233, 30, 99),    # Pink
         ]
-        
+            
     def process_frame(self, frame, roi=None):
         """Process frame with optional ROI (coordinates can be either absolute or in relative 0-1 range)"""
         frame_height, frame_width = frame.shape[:2]

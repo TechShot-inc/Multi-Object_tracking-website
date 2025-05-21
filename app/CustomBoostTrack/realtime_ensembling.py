@@ -138,22 +138,20 @@ class RealTimeTracker:
 
         # Run detection with ensembling for every frame
         dets = self.detector(detection_frame)
+        # Ensure dets is a numpy array on CPU before any numpy operation
+        if torch.is_tensor(dets):
+            dets = dets.cpu().numpy()
         if len(dets) == 0:
             dets = np.empty((0, 5))
         else:
             # Filter detections to only include those within the ROI
             if roi_applied:
                 # Convert detections to absolute coordinates
-                if torch.is_tensor(dets):
-                    dets_abs = dets.clone().cpu().numpy()
-                else:
-                    dets_abs = dets.copy()
-                
+                dets_abs = dets.copy()
                 dets_abs[:, 0] += x  # x1
                 dets_abs[:, 1] += y  # y1
                 dets_abs[:, 2] += x  # x2
                 dets_abs[:, 3] += y  # y2
-                
                 # Check if detection is within ROI
                 in_roi = (
                     (dets_abs[:, 0] >= x) &  # x1 >= roi_x
@@ -168,8 +166,16 @@ class RealTimeTracker:
         if len(dets) > 0:
             try:
                 # Use the original BGR frame for the tracker
-                targets = self.tracker.update(dets, img, frame, f"realtime:{frame_id}")
+                # Ensure img is on CPU if BoostTrack expects numpy
+                img_for_tracker = img
+                if isinstance(img_for_tracker, torch.Tensor):
+                    if img_for_tracker.device.type != 'cpu':
+                        img_for_tracker = img_for_tracker.cpu()
+                    img_for_tracker = img_for_tracker.numpy()
+                targets = self.tracker.update(dets, img_for_tracker, frame, f"realtime:{frame_id}")
                 # Minimal filtering: confidence > 0.2
+                if isinstance(targets, torch.Tensor):
+                    targets = targets.cpu().numpy()
                 if len(targets) > 0:
                     mask = targets[:, 5] > 0.2
                     targets = targets[mask]
@@ -208,6 +214,10 @@ class RealTimeTracker:
     def _process_targets(self, targets):
         """Convert BoostTrack output to tlwh, ids, confs."""
         tlwhs, ids, confs = [], [], []
+        # Ensure targets is on CPU if it's a tensor
+        if isinstance(targets, torch.Tensor):
+            targets = targets.cpu().numpy()
+
         for t in targets:
             x1, y1, x2, y2, track_id, conf = t
             tlwh = [x1, y1, x2 - x1, y2 - y1]
