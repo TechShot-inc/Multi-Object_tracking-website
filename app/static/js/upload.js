@@ -23,6 +23,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const uploadPreview = document.getElementById('upload-preview');
     const roiInstruction = document.getElementById('roi-instruction');
     const roiContainerUpload = document.getElementById('roi-container-upload');
+    const selectRoiButton = document.getElementById('select-roi-btn');
     const clearRoiButton = document.getElementById('clear-roi-upload');
     let resultId = null;
     let objectCountChart = null;
@@ -30,6 +31,28 @@ document.addEventListener('DOMContentLoaded', () => {
     let roiContextUpload = null;
     let videoWidth = 0;
     let videoHeight = 0;
+    let isRoiDrawingEnabled = false;
+
+    // Setup select ROI button
+    if (selectRoiButton) {
+        selectRoiButton.addEventListener('click', selectRoi);
+        console.log('Select ROI button initialized');
+    }
+
+    function selectRoi() {
+        if (!uploadPreview.videoWidth) {
+            showModal('Please upload a video and wait for it to load before selecting ROI.');
+            return;
+        }
+        isRoiDrawingEnabled = true;
+        if (roiInstruction) {
+            roiInstruction.textContent = 'Click and drag on the video to draw ROI.';
+            console.log('ROI instruction updated');
+        } else {
+            console.error('ROI instruction element not found');
+        }
+        console.log('Starting ROI selection, isRoiDrawingEnabled:', isRoiDrawingEnabled);
+    }
 
     // Setup clear ROI button
     if (clearRoiButton) {
@@ -41,8 +64,10 @@ document.addEventListener('DOMContentLoaded', () => {
                     roiContextUpload.drawImage(uploadPreview, 0, 0, roiCanvasUpload.width, roiCanvasUpload.height);
                 }
                 clearRoiButton.disabled = true;
+                isRoiDrawingEnabled = false;
                 if (roiInstruction) {
-                    roiInstruction.textContent = 'ROI cleared. Draw a new ROI or submit without ROI.';
+                    roiInstruction.textContent = 'ROI cleared. Click "Select ROI" to draw a new ROI or submit without ROI.';
+                    console.log('ROI instruction updated after clear');
                 }
                 console.log('ROI cleared');
             }
@@ -52,10 +77,13 @@ document.addEventListener('DOMContentLoaded', () => {
     // Initialize ROI canvas for upload
     if (roiCanvasUpload && uploadPreview) {
         roiContextUpload = roiCanvasUpload.getContext('2d');
+        // Ensure canvas receives pointer events
+        roiCanvasUpload.style.pointerEvents = 'auto';
+        roiCanvasUpload.style.zIndex = '10';
         roiCanvasUpload.addEventListener('mousedown', startDrawingROI);
         roiCanvasUpload.addEventListener('mousemove', drawROI);
         roiCanvasUpload.addEventListener('mouseup', finishDrawingROI);
-        console.log('ROI canvas for upload initialized');
+        console.log('ROI canvas initialized, events bound');
 
         uploadPreview.addEventListener('loadedmetadata', () => {
             console.log('Video metadata loaded');
@@ -64,16 +92,35 @@ document.addEventListener('DOMContentLoaded', () => {
 
         function resizeRoiCanvas() {
             if (uploadPreview.videoWidth && uploadPreview.videoHeight) {
-                roiCanvasUpload.width = uploadPreview.videoWidth;
-                roiCanvasUpload.height = uploadPreview.videoHeight;
-                roiCanvasUpload.style.width = uploadPreview.offsetWidth + 'px';
-                roiCanvasUpload.style.height = uploadPreview.offsetHeight + 'px';
                 videoWidth = uploadPreview.videoWidth;
                 videoHeight = uploadPreview.videoHeight;
-                console.log(`Video dimensions: ${videoWidth}x${videoHeight}`);
+                const container = roiContainerUpload;
+                const containerWidth = container.offsetWidth;
+                const aspectRatio = videoWidth / videoHeight;
+                const canvasWidth = containerWidth;
+                const canvasHeight = containerWidth / aspectRatio;
+
+                console.log(`Resizing canvas: containerWidth=${containerWidth}, video=${videoWidth}x${videoHeight}, canvas=${canvasWidth}x${canvasHeight}`);
+
+                // Set video and canvas display size
+                uploadPreview.style.width = `${canvasWidth}px`;
+                uploadPreview.style.height = `${canvasHeight}px`;
+                roiCanvasUpload.style.width = `${canvasWidth}px`;
+                roiCanvasUpload.style.height = `${canvasHeight}px`;
+
+                // Set canvas internal resolution
+                roiCanvasUpload.width = videoWidth;
+                roiCanvasUpload.height = videoHeight;
+
+                // Draw video on canvas
                 setTimeout(() => {
-                    roiContextUpload.drawImage(uploadPreview, 0, 0, roiCanvasUpload.width, roiCanvasUpload.height);
+                    if (uploadPreview.videoWidth) {
+                        roiContextUpload.drawImage(uploadPreview, 0, 0, roiCanvasUpload.width, roiCanvasUpload.height);
+                        console.log('Video drawn on canvas');
+                    }
                 }, 100);
+            } else {
+                console.error('Video dimensions not available');
             }
         }
 
@@ -90,12 +137,17 @@ document.addEventListener('DOMContentLoaded', () => {
                     uploadPreview.src = URL.createObjectURL(file);
                     roiContainerUpload.classList.remove('hidden');
                     window.roiUpload = null;
+                    isRoiDrawingEnabled = false;
                     if (roiInstruction) {
                         roiInstruction.textContent = 'Click "Select ROI" to draw on the video.';
+                        console.log('ROI instruction updated after video upload');
                     }
+                    console.log('Video file selected, preview updated');
                 }
             });
         }
+    } else {
+        console.error('ROI canvas or video preview not found');
     }
 
     let drawing = false;
@@ -103,6 +155,8 @@ document.addEventListener('DOMContentLoaded', () => {
     window.roiUpload = null;
 
     function startDrawingROI(e) {
+        console.log('Mousedown event triggered, isRoiDrawingEnabled:', isRoiDrawingEnabled);
+        if (!isRoiDrawingEnabled) return;
         if (!uploadPreview.videoWidth) {
             showModal('Please wait for the video to load before selecting ROI.');
             return;
@@ -123,6 +177,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function drawROI(e) {
         if (!drawing) return;
+        console.log('Drawing ROI');
         const canvasRect = roiCanvasUpload.getBoundingClientRect();
         const scaleX = roiCanvasUpload.width / canvasRect.width;
         const scaleY = roiCanvasUpload.height / canvasRect.height;
@@ -148,6 +203,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function finishDrawingROI(e) {
         if (!drawing) return;
         drawing = false;
+        console.log('Finished drawing ROI');
         const canvasRect = roiCanvasUpload.getBoundingClientRect();
         const scaleX = roiCanvasUpload.width / canvasRect.width;
         const scaleY = roiCanvasUpload.height / canvasRect.height;
@@ -169,6 +225,10 @@ document.addEventListener('DOMContentLoaded', () => {
             showModal(`ROI is too small. Please select a larger area (minimum ${minWidth}x${minHeight} pixels).`);
             window.roiUpload = null;
             clearRoiButton.disabled = true;
+            isRoiDrawingEnabled = false;
+            if (roiInstruction) {
+                roiInstruction.textContent = 'Click "Select ROI" to draw a new ROI or submit without ROI.';
+            }
             return;
         }
         roiContextUpload.clearRect(0, 0, roiCanvasUpload.width, roiCanvasUpload.height);
@@ -182,8 +242,10 @@ document.addEventListener('DOMContentLoaded', () => {
         roiContextUpload.strokeRect(window.roiUpload.x, window.roiUpload.y, window.roiUpload.width, window.roiUpload.height);
         console.log('ROI selected:', window.roiUpload);
         clearRoiButton.disabled = false;
+        isRoiDrawingEnabled = false;
         if (roiInstruction) {
-            roiInstruction.textContent = 'ROI selected. Submit to process video.';
+            roiInstruction.textContent = 'ROI selected. Submit to process video or click "Clear ROI" to reset.';
+            console.log('ROI instruction updated after selection');
         }
     }
 
@@ -465,8 +527,10 @@ document.addEventListener('DOMContentLoaded', () => {
         roiContainerUpload.classList.add('hidden');
         window.roiUpload = null;
         clearRoiButton.disabled = true;
+        isRoiDrawingEnabled = false;
         if (roiInstruction) {
             roiInstruction.textContent = 'Upload a video to select ROI.';
+            console.log('ROI instruction reset');
         }
         if (uploadPreview.src) {
             URL.revokeObjectURL(uploadPreview.src);
@@ -476,7 +540,13 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function showModal(message) {
-        document.getElementById('modal-message').textContent = message;
-        document.getElementById('modal').classList.remove('hidden');
+        const modalMessage = document.getElementById('modal-message');
+        if (modalMessage) {
+            modalMessage.textContent = message;
+            document.getElementById('modal').classList.remove('hidden');
+            console.log('Modal shown:', message);
+        } else {
+            console.error('Modal message element not found');
+        }
     }
 });

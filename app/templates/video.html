@@ -50,12 +50,12 @@
                     <label class="block text-sm font-medium text-gray-700">Region of Interest (ROI)</label>
                     <p class="text-sm text-gray-500">Optionally draw a rectangle on the video preview to limit tracking to that area.</p>
                     <div class="mt-2 flex space-x-3">
-                        <button type="button" id="select-roi-upload" class="px-4 py-2 bg-teal-500 text-white rounded-lg hover:bg-teal-600 transition">Select ROI</button>
+                        <button type="button" id="select-roi-btn" class="px-4 py-2 bg-teal-500 text-white rounded-lg hover:bg-teal-600 transition">Select ROI</button>
                         <button type="button" id="clear-roi-upload" disabled class="px-4 py-2 bg-gray-300 text-gray-700 rounded-lg">Clear ROI</button>
                     </div>
                     <div id="roi-container-upload" class="roi-container mt-4 hidden relative">
-                        <video id="upload-preview" controls class="w-full rounded-lg"></video>
-                        <canvas id="roi-canvas-upload" class="absolute top-0 left-0 rounded-lg"></canvas>
+                        <video id="upload-preview" controls class="w-full max-w-full h-auto rounded-lg"></video>
+                        <canvas id="roi-canvas-upload" class="absolute top-0 left-0 w-full h-auto rounded-lg"></canvas>
                         <p id="roi-instruction" class="text-sm absolute bottom-2 right-2 bg-black bg-opacity-70 text-white py-1 px-3 rounded">Upload a video to select ROI.</p>
                     </div>
                 </div>
@@ -71,7 +71,7 @@
 
         <section id="results-container" class="bg-white p-8 rounded-xl shadow-xl hidden">
             <h2 class="text-2xl font-semibold text-blue-900 mb-6">Tracking Results</h2>
-            <video id="result-video" controls class="w-full rounded-lg shadow-sm"></video>
+            <video id="result-video" controls class="w-full max-w-full h-auto rounded-lg shadow-sm"></video>
             <div class="mt-6 flex space-x-3">
                 <button id="replay-video" class="px-4 py-2 bg-blue-900 text-white rounded-lg hover:bg-blue-800 transition">Replay</button>
                 <button id="download-video" class="px-4 py-2 bg-blue-900 text-white rounded-lg hover:bg-blue-800 transition">Download Video</button>
@@ -123,114 +123,28 @@
     <script src="/static/js/common.js"></script>
     <script src="/static/js/upload.js"></script>
     <script>
-        let roiUpload = null;
-        let isSelectingRoi = false;
-        let roiStart = null;
-
-        // ROI Selection for Video Upload
-        const roiCanvasUpload = document.getElementById('roi-canvas-upload');
-        const selectRoiButtonUpload = document.getElementById('select-roi-upload');
-        const clearRoiButtonUpload = document.getElementById('clear-roi-upload');
-        const uploadPreview = document.getElementById('upload-preview');
-        let roiContextUpload = roiCanvasUpload.getContext('2d');
-
-        function resizeRoiCanvasUpload() {
-            const videoWidth = uploadPreview.videoWidth || 1280;
-            const videoHeight = uploadPreview.videoHeight || 720;
-            console.log('Resizing upload canvas to:', videoWidth, 'x', videoHeight);
-            uploadPreview.style.width = videoWidth + 'px';
-            uploadPreview.style.height = videoHeight + 'px';
-            roiCanvasUpload.style.width = videoWidth + 'px';
-            roiCanvasUpload.style.height = videoHeight + 'px';
-            roiCanvasUpload.width = videoWidth;
-            roiCanvasUpload.height = videoHeight;
+        async function getImageData(img) {
+            return new Promise((resolve, reject) => {
+                if (img.complete && img.naturalHeight !== 0) {
+                    const canvas = document.createElement('canvas');
+                    canvas.width = img.naturalWidth;
+                    canvas.height = img.naturalHeight;
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(img, 0, 0);
+                    resolve(canvas.toDataURL('image/png'));
+                } else {
+                    img.onload = () => {
+                        const canvas = document.createElement('canvas');
+                        canvas.width = img.naturalWidth;
+                        canvas.height = img.naturalHeight;
+                        const ctx = canvas.getContext('2d');
+                        ctx.drawImage(img, 0, 0);
+                        resolve(canvas.toDataURL('image/png'));
+                    };
+                    img.onerror = () => reject(new Error('Failed to load image'));
+                }
+            });
         }
-
-        uploadPreview.addEventListener('loadedmetadata', resizeRoiCanvasUpload);
-
-        selectRoiButtonUpload.addEventListener('click', () => {
-            console.log('Select ROI (upload) clicked');
-            isSelectingRoi = true;
-            roiCanvasUpload.style.pointerEvents = 'auto';
-            roiCanvasUpload.style.cursor = 'crosshair';
-            document.getElementById('upload-status').querySelector('.status-message').textContent = 'Draw ROI on video';
-            isDrawingRoi = true;
-        });
-
-        clearRoiButtonUpload.addEventListener('click', () => {
-            console.log('Clear ROI (upload) clicked');
-            roiUpload = null;
-            roiContextUpload.clearRect(0, 0, roiCanvasUpload.width, roiCanvasUpload.height);
-            clearRoiButtonUpload.disabled = true;
-            roiCanvasUpload.style.pointerEvents = 'none';
-            isDrawingRoi = false;
-            document.getElementById('upload-status').querySelector('.status-message').textContent = 'ROI cleared';
-        });
-
-        let isDrawingRoi = false;
-        let startX, startY;
-
-        roiCanvasUpload.addEventListener('mousedown', function(e) {
-            if (!isDrawingRoi) return;
-            const rect = roiCanvasUpload.getBoundingClientRect();
-            startX = e.clientX - rect.left;
-            startY = e.clientY - rect.top;
-        });
-
-        roiCanvasUpload.addEventListener('mousemove', function(e) {
-            if (!isDrawingRoi) return;
-            const rect = roiCanvasUpload.getBoundingClientRect();
-            const x = e.clientX - rect.left;
-            const y = e.clientY - rect.top;
-            roiContextUpload.clearRect(0, 0, roiCanvasUpload.width, roiCanvasUpload.height);
-            roiContextUpload.strokeStyle = '#2DD4BF';
-            roiContextUpload.lineWidth = 2;
-            roiContextUpload.fillStyle = 'rgba(45, 212, 191, 0.15)';
-            const rectX = Math.min(startX, x);
-            const rectY = Math.min(startY, y);
-            const rectW = Math.abs(x - startX);
-            const rectH = Math.abs(y - startY);
-            roiContextUpload.fillRect(rectX, rectY, rectW, rectH);
-            roiContextUpload.strokeRect(rectX, rectY, rectW, rectH);
-        });
-
-        roiCanvasUpload.addEventListener('mouseup', function(e) {
-            if (!isDrawingRoi) return;
-            isSelectingRoi = false;
-            roiCanvasUpload.style.cursor = 'default';
-            roiCanvasUpload.style.pointerEvents = 'none';
-            const rect = roiCanvasUpload.getBoundingClientRect();
-            const x = e.clientX - rect.left;
-            const y = e.clientY - rect.top;
-            const roiWidth = Math.abs(x - startX);
-            const roiHeight = Math.abs(y - startY);
-            roiUpload = {
-                x: Math.min(startX, x),
-                y: Math.min(startY, y),
-                width: roiWidth,
-                height: roiHeight
-            };
-            const minWidth = (uploadPreview.videoWidth || 640) * 0.05;
-            const minHeight = (uploadPreview.videoHeight || 480) * 0.05;
-            if (roiUpload.width < minWidth || roiUpload.height < minHeight) {
-                showModal(`ROI is too small. Please select a larger area (minimum ${minWidth}x${minHeight} pixels).`);
-                roiUpload = null;
-                roiContextUpload.clearRect(0, 0, roiCanvasUpload.width, roiCanvasUpload.height);
-                clearRoiButtonUpload.disabled = true;
-                uploadPreview.play();
-                return;
-            }
-            roiContextUpload.clearRect(0, 0, roiCanvasUpload.width, roiCanvasUpload.height);
-            roiContextUpload.strokeStyle = '#2DD4BF';
-            roiContextUpload.lineWidth = 3;
-            roiContextUpload.fillStyle = 'rgba(45, 212, 191, 0.2)';
-            roiContextUpload.fillRect(roiUpload.x, roiUpload.y, roiUpload.width, roiUpload.height);
-            roiContextUpload.strokeRect(roiUpload.x, roiUpload.y, roiUpload.width, roiUpload.height);
-            clearRoiButtonUpload.disabled = false;
-            document.getElementById('upload-status').querySelector('.status-message').textContent = 'ROI selected';
-            uploadPreview.play();
-            isDrawingRoi = false;
-        });
 
         // Download Report Implementation
         document.getElementById('download-report').addEventListener('click', async () => {

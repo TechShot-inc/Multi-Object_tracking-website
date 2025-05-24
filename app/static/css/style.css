@@ -276,3 +276,25 @@ canvas:hover, video:hover {
     outline: 2px solid var(--secondary);
     outline-offset: 2px;
 }
+.roi-container {
+    position: relative;
+    width: 100%;
+    max-width: 100%;
+}
+
+#upload-preview, #roi-canvas-upload {
+    width: 100%;
+    height: auto;
+    display: block;
+}
+
+#roi-canvas-upload {
+    position: absolute;
+    top: 0;
+    left: 0;
+    pointer-events: none;
+}
+
+#roi-instruction {
+    z-index: 10;
+}

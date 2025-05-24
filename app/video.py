@@ -1,12 +1,11 @@
 from flask import request, jsonify, url_for, send_file, Response
+import subprocess
 from app.app import app
-from .tracking import main as process_tracking
-from .CustomBoostTrack.realtime_ensembling import RealTimeTracker
+from .tracking import process_video_with_tracking as process_tracking
 import os
 import json
 from werkzeug.utils import secure_filename
 import threading
-import subprocess
 import shutil
 import base64
 import cv2
@@ -17,7 +16,7 @@ import pandas as pd
 import logging
 
 # Configure logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.ERROR)
 logger = logging.getLogger(__name__)
 
 # Processing status
@@ -36,7 +35,7 @@ def make_video_web_compatible(input_path, output_path, fps):
         command = [
             'ffmpeg', '-y',
             '-i', input_path,
-            '-r', str(fps),  # Explicitly set frame rate
+            '-r', str(fps),
             '-c:v', 'libx264',
             '-preset', 'medium',
             '-crf', '23',
@@ -46,35 +45,60 @@ def make_video_web_compatible(input_path, output_path, fps):
             '-b:a', '128k',
             output_path
         ]
-        subprocess.run(command, check=True, capture_output=True)
-        logger.info(f"Video converted successfully: {output_path} at {fps} FPS")
+        result = subprocess.run(command, check=True, capture_output=True, text=True, timeout=300)
+        logger.error(f"Video converted successfully: {output_path} at {fps} FPS")
         return True
+    except subprocess.TimeoutExpired:
+        logger.error("Video conversion timed out after 300 seconds")
+        return False
     except subprocess.CalledProcessError as e:
-        logger.error(f"Error converting video: {e.stderr.decode()}")
+        logger.error(f"Error converting video: {e.stderr}")
         return False
     except Exception as e:
         logger.error(f"Error in video conversion: {e}")
         return False
 
+def extract_frames(video_path, output_folder, speed=5):
+    """Extract frames from video at specified speed."""
+    if not os.path.exists(output_folder):
+        os.makedirs(output_folder)
+    cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        raise Exception("Error opening video file")
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    frame_interval = max(1, int(speed))  # speed directly controls sampling
+    saved_frame_number = 0
+    original_frame_number = 0
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            break
+        if original_frame_number % frame_interval == 0:
+            frame_filename = os.path.join(output_folder, f"frame_{saved_frame_number:06d}.jpg")
+            cv2.imwrite(frame_filename, frame)
+            saved_frame_number += 1
+        original_frame_number += 1
+    cap.release()
+    expected_frames = (total_frames + frame_interval - 1) // frame_interval
+    if abs(saved_frame_number - expected_frames) > 1:
+        logger.error(f"Expected ~{expected_frames} frames, extracted {saved_frame_number} for speed={speed}")
+    logger.error(f"Extracted {saved_frame_number} frames to {output_folder} for speed={speed}")
+
 def process_video(video_path, output_path, filename, speed=1.0, output_speed=1.0, roi=None):
-    """Process video with tracking and ROI"""
+    """Process video with tracking and ROI."""
     try:
-        logger.info(f"Starting video processing for: {video_path}")
+        logger.error(f"Starting video processing for: {video_path}, speed={speed}, output_speed={output_speed}")
         
         # Create results directory
-        results_dir = os.path.dirname(output_path)
-        os.makedirs(results_dir, exist_ok=True)
-        logger.info(f"Created results directory: {results_dir}")
+        result_dir = os.path.dirname(output_path)
+        os.makedirs(result_dir, exist_ok=True)
+        logger.error(f"Created results directory: {result_dir}")
         
         # Create analytics directory
-        analytics_dir = os.path.join(results_dir, 'analytics')
+        analytics_dir = os.path.join(result_dir, 'analytics')
         os.makedirs(analytics_dir, exist_ok=True)
-        logger.info(f"Created analytics directory: {analytics_dir}")
-        
-        # Create frames directory for tracking
-        frames_dir = os.path.join(results_dir, 'frames')
-        os.makedirs(frames_dir, exist_ok=True)
-        logger.info(f"Created frames directory: {frames_dir}")
+        logger.error(f"Created analytics directory: {analytics_dir}")
         
         # Initialize video capture
         cap = cv2.VideoCapture(video_path)
@@ -84,53 +108,42 @@ def process_video(video_path, output_path, filename, speed=1.0, output_speed=1.0
         # Get video properties
         width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        fps = int(cap.get(cv2.CAP_PROP_FPS))
+        fps = cap.get(cv2.CAP_PROP_FPS)
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        logger.info(f"Video properties: {width}x{height} @ {fps}fps, {total_frames} frames")
-        
-        # Extract frames with ROI if provided
-        frame_count = 0
-        extracted_frames = 0
-        logger.info(f"Starting frame extraction with speed={speed}...")
-        
-        while cap.isOpened():
-            ret, frame = cap.read()
-            if not ret:
-                break
-            # Modulo-based frame sampling
-            if frame_count % int(speed) == 0:
-                if roi:
-                    x, y, w, h = roi
-                    frame = frame[y:y+h, x:x+w]
-                frame_path = os.path.join(frames_dir, f"frame_{extracted_frames:06d}.jpg")
-                cv2.imwrite(frame_path, frame)
-                extracted_frames += 1
-            frame_count += 1
-            
-            # Update progress (25% for frame extraction)
-            progress = frame_count / total_frames
-            processing_status[filename] = {
-                'status': 'processing',
-                'progress': progress * 0.25,
-                'message': f'Extracting frames: {frame_count}/{total_frames}'
-            }
-        
+        logger.error(f"Video properties: {width}x{height} @ {fps}fps, {total_frames} frames")
         cap.release()
-        logger.info(f"Frame extraction complete. Extracted {extracted_frames} frames")
         
-        # Validate frame count
-        expected_frames = total_frames // speed
-        if abs(extracted_frames - expected_frames) > 1:
-            logger.warning(f"Expected ~{expected_frames} frames, got {extracted_frames}")
+        # Validate ROI against video dimensions
+        if roi:
+            required_keys = ['x', 'y', 'width', 'height']
+            if not all(k in roi for k in required_keys):
+                logger.error("Invalid ROI format")
+                raise ValueError("Invalid ROI format")
+            for key in required_keys:
+                if not isinstance(roi[key], (int, float)) or roi[key] <= 0:
+                    logger.error(f"Invalid ROI {key} value: {roi[key]}")
+                    raise ValueError(f"Invalid ROI {key} value: {roi[key]}")
+            if (roi['x'] + roi['width'] > width or roi['y'] + roi['height'] > height):
+                logger.error("ROI exceeds video dimensions")
+                raise ValueError("ROI exceeds video dimensions")
+            logger.error(f"Validated ROI: {roi}")
         
-        # Run tracking with ensembler
-        output_folder = os.path.join(results_dir, 'results')
-        os.makedirs(output_folder, exist_ok=True)
-        logger.info(f"Created output folder for tracking: {output_folder}")
+        # Update status for frame extraction (0% to 25%)
+        processing_status[filename] = {
+            'status': 'processing',
+            'progress': 0.0,
+            'message': 'Extracting frames...'
+        }
         
-        # Calculate frame rate for tracking
-        tracking_fps = max(1, int(fps / speed))
-        logger.info(f"Using tracking FPS: {tracking_fps}")
+        # Extract frames
+        frames_path = os.path.join(result_dir, 'frames')
+        extract_frames(video_path, frames_path, speed=speed)
+        
+        # Verify frames were extracted
+        frame_files = [f for f in os.listdir(frames_path) if f.endswith('.jpg')]
+        if not frame_files:
+            raise Exception(f"No frames extracted to {frames_path}")
+        logger.error(f"Found {len(frame_files)} frames in {frames_path}")
         
         # Update status for tracking (25% to 75%)
         processing_status[filename] = {
@@ -139,198 +152,93 @@ def process_video(video_path, output_path, filename, speed=1.0, output_speed=1.0
             'message': 'Running tracking...'
         }
         
-        # Prepare tracking command
-        # Use path relative to video.py
-        base_dir = os.path.dirname(os.path.abspath(__file__))
-        tracking_script = os.path.join(base_dir, "CustomBoostTrack", "run_with_ensembler.py")
-        if not os.path.exists(tracking_script):
-            raise Exception(f"Tracking script not found: {tracking_script}")
-            
-        logger.info(f"Tracking script exists: {os.path.exists(tracking_script)}")
+        # Run ensembler as subprocess
+        base_name = os.path.splitext(os.path.basename(video_path))[0]
+        tracking_dir = os.path.join(result_dir, 'tracking')
+        os.makedirs(tracking_dir, exist_ok=True)
+        script_path = os.path.join(app.config['APP_DIR'], 'CustomBoostTrack', 'run_with_ensembler.py')
+        command = [
+            'python', script_path,
+            '--dataset', 'tarsh',
+            '--exp_name', 'BTPP',
+            '--result_folder', tracking_dir,
+            '--frame_rate', str(int(fps / speed)),
+            '--dataset_path', frames_path,
+            '--model1_path', os.path.join(app.config['APP_DIR'], 'models', 'General2.pt'),
+            '--model1_weight', '0.7',
+            '--model2_path', os.path.join(app.config['APP_DIR'], 'models', '12General1.pt'),
+            '--model2_weight', '0.3',
+            '--reid_path', os.path.join(app.config['APP_DIR'], 'models', 'osnet_ain_ms_m_c.pth.tar'),
+            '--conf_thresh', '0.1'
+        ]
+        if roi:
+            roi_str = f"{int(roi['x'])},{int(roi['y'])},{int(roi['width'])},{int(roi['height'])}"
+            command.extend(['--roi', roi_str])
         
-        # Run tracking process with real-time terminal logging
+        # Verify file paths
+        file_paths = [
+            script_path,
+            command[13],  # model1_path
+            command[17],  # model2_path
+            command[21],  # reid_path
+            frames_path,
+            command[7]   # tracking_dir
+        ]
+        for path in file_paths:
+            if not os.path.exists(path):
+                raise FileNotFoundError(f"Required file or directory not found: {path}")
+        
+        logger.error(f"Running command: {' '.join(command)}")
         try:
-            logger.info("Starting tracking process...")
-            tracking_command = [
-                "python", tracking_script,
-                "--dataset", "custom",
-                "--exp_name", "tracking",
-                "--result_folder", output_folder,
-                "--frame_rate", str(tracking_fps),
-                "--dataset_path", frames_dir,
-                "--model1_path", os.path.join(base_dir, "models", "General1.pt"),
-                "--model1_weight", "0.7",
-                "--model2_path", os.path.join(base_dir, "models", "YOLO12Final.pt"),
-                "--model2_weight", "0.3",
-                "--conf_thresh", "0.1"
-            ]
-            logger.info(f"Tracking command: {' '.join(tracking_command)}")
-            tracking_process = subprocess.Popen(
-                tracking_command,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                bufsize=1,
-                universal_newlines=True
-            )
-            
-            def stream_logs():
-                while True:
-                    stdout_line = tracking_process.stdout.readline()
-                    stderr_line = tracking_process.stderr.readline()
-                    if stdout_line:
-                        logger.info(stdout_line.strip())
-                    if stderr_line:
-                        logger.error(stderr_line.strip())
-                    if tracking_process.poll() is not None:
-                        # Capture any remaining output
-                        for line in tracking_process.stdout:
-                            logger.info(line.strip())
-                        for line in tracking_process.stderr:
-                            logger.error(line.strip())
-                        break
-            
-            log_thread = threading.Thread(target=stream_logs)
-            log_thread.start()
-            
-            try:
-                tracking_process.wait(timeout=600)  # 10 minutes
-                log_thread.join()
-                if tracking_process.returncode != 0:
-                    raise Exception(f"Tracking failed with return code {tracking_process.returncode}")
-            except subprocess.TimeoutExpired:
-                tracking_process.kill()
-                log_thread.join()
-                raise Exception("Tracking process timed out after 10 minutes")
-                
-        except Exception as e:
-            logger.error(f"Error running tracking process: {str(e)}")
-            raise
+            result = subprocess.run(command, check=True, capture_output=True, text=True)
+            logger.error(f"Subprocess output: {result.stdout}")
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Subprocess failed with exit code {e.returncode}")
+            logger.error(f"Subprocess stdout: {e.stdout}")
+            logger.error(f"Subprocess stderr: {e.stderr}")
+            raise Exception(f"Subprocess failed: {e.stderr}")
         
-        logger.info("Tracking process completed successfully")
+        # Find tracking results (test.txt)
+        tracking_data_path = os.path.join(tracking_dir, 'tarsh-val', 'BTPP_post_gbi', 'data', 'test.txt')
+        if not os.path.exists(tracking_data_path):
+            raise Exception(f"Tracking data not found: {tracking_data_path}")
         
-        # Update status for post-processing (75% to 90%)
+        # Parse tracking results into detections
+        detections = {}
+        with open(tracking_data_path, 'r') as f:
+            for line in f:
+                parts = line.strip().split(',')
+                frame_id = int(parts[0])
+                track_id = int(parts[1])
+                x, y, w, h = map(float, parts[2:6])
+                conf = float(parts[6]) if len(parts) > 6 else 1.0
+                if frame_id not in detections:
+                    detections[frame_id] = []
+                detections[frame_id].append([x, y, x+w, y+h, conf, 0, track_id])
+        logger.error(f"Parsed {len(detections)} frames of detections for speed={speed}")
+        
+        # Update status for analytics processing (75% to 90%)
         processing_status[filename] = {
             'status': 'processing',
             'progress': 0.75,
-            'message': 'Processing results...'
+            'message': 'Processing analytics...'
         }
         
-        # Find tracking results
-        tracking_results_path = None
-        for root, dirs, files in os.walk(output_folder):
-            if "test.txt" in files:
-                tracking_results_path = os.path.join(root, "test.txt")
-                break
+        # Run tracking for analytics
+        output_video, analytics_file = process_tracking(
+            video_path=video_path,
+            output_dir=result_dir,
+            detections=detections,
+            speed=speed,
+            output_speed=output_speed,
+            roi=roi
+        )
+        logger.error(f"Analytics completed, video: {output_video}, analytics: {analytics_file}")
         
-        if not tracking_results_path:
-            raise Exception("Tracking results not found")
-        
-        logger.info(f"Found tracking results at: {tracking_results_path}")
-        
-        # Copy tracking results to analytics directory
+        # Copy tracking results to analytics directory as test.txt
         mot_file = os.path.join(analytics_dir, 'test.txt')
-        shutil.copy2(tracking_results_path, mot_file)
-        logger.info(f"Copied tracking results to: {mot_file}")
-        
-        # Process frames with tracking results
-        cap = cv2.VideoCapture(video_path)
-        output_fps = max(1, (fps / speed) / output_speed)  # Correct output frame rate
-        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-        out = cv2.VideoWriter(output_path, fourcc, output_fps, (width, height))
-        
-        # Read tracking results
-        tracking_df = pd.read_csv(tracking_results_path, header=None)
-        if tracking_df.shape[1] >= 7:
-            tracking_df.columns = ['frame', 'track_id', 'x', 'y', 'width', 'height', 'confidence'] + \
-                                [f'col_{i}' for i in range(tracking_df.shape[1] - 7)]
-        
-        logger.info(f"Loaded tracking data with {len(tracking_df)} detections")
-        
-        frame_files = sorted([f for f in os.listdir(frames_dir) if f.endswith('.jpg')])
-        if len(frame_files) != extracted_frames:
-            logger.warning(f"Expected {extracted_frames} frames, found {len(frame_files)} in {frames_dir}")
-        
-        tracking_data = {}
-        
-        logger.info(f"Processing {len(frame_files)} extracted frames with tracking results...")
-        for frame_idx, frame_file in enumerate(frame_files, 1):
-            frame_path = os.path.join(frames_dir, frame_file)
-            frame = cv2.imread(frame_path)
-            
-            # Create full-size frame if ROI was applied
-            if roi:
-                x, y, w, h = roi
-                full_frame = np.zeros((height, width, 3), dtype=np.uint8)
-                full_frame[y:y+h, x:x+w] = frame
-                frame = full_frame
-            
-            # Get detections for this frame
-            frame_detections = tracking_df[tracking_df['frame'] == frame_idx]
-            detections_list = []
-            
-            for _, det in frame_detections.iterrows():
-                det_x = int(det['x'])
-                det_y = int(det['y'])
-                det_w = int(det['width'])
-                det_h = int(det['height'])
-                track_id = int(det['track_id'])
-                conf = float(det['confidence'])
-                
-                # Adjust coordinates if ROI was applied
-                if roi:
-                    det_x += x
-                    det_y += y
-                
-                # Draw detection
-                cv2.rectangle(frame, (det_x, det_y), (det_x + det_w, det_y + det_h), (0, 255, 0), 2)
-                cv2.putText(frame, f"ID: {track_id}", (det_x, det_y - 10),
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
-                
-                detections_list.append({
-                    'id': track_id,
-                    'x': det_x,
-                    'y': det_y,
-                    'width': det_w,
-                    'height': det_h,
-                    'confidence': conf
-                })
-            
-            # Draw ROI if applied
-            if roi:
-                overlay = frame.copy()
-                cv2.rectangle(overlay, (0, 0), (width, height), (0, 0, 0), -1)
-                cv2.rectangle(overlay, (x, y), (x + w, y + h), (0, 0, 0), -1)
-                cv2.addWeighted(overlay, 0.3, frame, 0.7, 0, frame)
-                cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
-                label = "Active ROI"
-                cv2.putText(frame, label, (x + 5, y - 5),
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
-            
-            # Write frame
-            out.write(frame)
-            logger.info(f"Writing frame {frame_idx} at {output_fps} FPS")
-            
-            tracking_data[str(frame_idx)] = detections_list
-            
-            # Update progress (75% to 90%)
-            progress = 0.75 + (frame_idx / len(frame_files)) * 0.15
-            processing_status[filename] = {
-                'status': 'processing',
-                'progress': progress,
-                'message': f'Processing frame {frame_idx}/{len(frame_files)}'
-            }
-        
-        # Release resources
-        cap.release()
-        out.release()
-        logger.info(f"Finished processing {len(frame_files)} frames, output FPS: {output_fps}")
-        
-        # Save tracking data
-        tracking_file = os.path.join(analytics_dir, 'tracking_data.json')
-        with open(tracking_file, 'w') as f:
-            json.dump(tracking_data, f)
-        logger.info(f"Saved tracking data to: {tracking_file}")
+        shutil.copy2(tracking_data_path, mot_file)
+        logger.error(f"Copied tracking results to: {mot_file}")
         
         # Update status for final conversion (90% to 100%)
         processing_status[filename] = {
@@ -341,25 +249,22 @@ def process_video(video_path, output_path, filename, speed=1.0, output_speed=1.0
         
         # Convert to web-compatible format
         web_output = output_path.replace('.mp4', '_web.mp4')
-        logger.info(f"Converting video to web format: {web_output}")
+        logger.error(f"Converting video to web format: {web_output}")
         
-        if not make_video_web_compatible(output_path, web_output, output_fps):
+        output_fps = max(1, fps * output_speed)
+        if not make_video_web_compatible(output_video, web_output, output_fps):
             raise Exception("Video conversion failed")
         
-        logger.info("Video conversion complete")
+        logger.error("Video conversion complete")
         
         # Clean up original file
-        os.remove(output_path)
-        
-        # Clean up temporary files
-        shutil.rmtree(frames_dir)
-        shutil.rmtree(output_folder)
-        logger.info("Cleaned up temporary files")
+        os.remove(output_video)
+        logger.error(f"Removed original video: {output_video}")
         
         # Verify all required files exist before marking as complete
         required_files = [
             web_output,
-            tracking_file,
+            analytics_file,
             mot_file
         ]
         
@@ -367,7 +272,7 @@ def process_video(video_path, output_path, filename, speed=1.0, output_speed=1.0
             if not os.path.exists(file_path):
                 raise Exception(f"Required file not found: {file_path}")
         
-        logger.info("All required files verified")
+        logger.error("All required files verified")
         
         # Update final status
         processing_status[filename] = {
@@ -376,7 +281,7 @@ def process_video(video_path, output_path, filename, speed=1.0, output_speed=1.0
             'message': 'Processing complete'
         }
         
-        logger.info("Video processing completed successfully")
+        logger.error("Video processing completed successfully")
         return web_output
         
     except Exception as e:
@@ -407,19 +312,19 @@ def upload_video():
             result_dir = os.path.join(app.config['RESULTS_FOLDER'], base_name)
             if os.path.exists(video_path):
                 os.remove(video_path)
-                logger.info(f"Deleted existing video: {video_path}")
+                logger.error(f"Deleted existing video: {video_path}")
             if os.path.exists(thumbnail_path):
                 os.remove(thumbnail_path)
-                logger.info(f"Deleted existing thumbnail: {thumbnail_path}")
+                logger.error(f"Deleted existing thumbnail: {thumbnail_path}")
             if os.path.exists(result_dir):
                 shutil.rmtree(result_dir)
-                logger.info(f"Deleted existing results directory: {result_dir}")
+                logger.error(f"Deleted existing results directory: {result_dir}")
         except Exception as e:
             logger.error(f"Error deleting existing files: {e}")
             return jsonify({'status': 'error', 'message': f'Error deleting existing files: {str(e)}'}), 500
         os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
         file.save(video_path)
-        logger.info(f"Video uploaded: {video_path}")
+        logger.error(f"Video uploaded: {video_path}")
         thumbnail_path = os.path.join(app.config['UPLOAD_FOLDER'], f"{os.path.splitext(filename)[0]}_thumb.jpg")
         cap = cv2.VideoCapture(video_path)
         ret, frame = cap.read()
@@ -427,13 +332,13 @@ def upload_video():
             _, buffer = cv2.imencode('.jpg', frame)
             with open(thumbnail_path, 'wb') as f:
                 f.write(buffer)
-            logger.info(f"Thumbnail generated: {thumbnail_path}")
+            logger.error(f"Thumbnail generated: {thumbnail_path}")
         else:
-            logger.warning(f"Failed to generate thumbnail for: {video_path}")
+            logger.error(f"Failed to generate thumbnail for: {video_path}")
         cap.release()
         speed = float(request.form.get('speed', 5))
         output_speed = float(request.form.get('output_speed', 1))
-        logger.info(f"Received parameters: speed={speed}, output_speed={output_speed}")
+        logger.error(f"Received parameters: speed={speed}, output_speed={output_speed}")
         roi = None
         if 'roi' in request.form:            
             try:
@@ -444,7 +349,7 @@ def upload_video():
                 for key in ['x', 'y', 'width', 'height']:
                     if not isinstance(roi[key], (int, float)) or roi[key] < 0:
                         raise ValueError(f"Invalid ROI {key} value: {roi[key]}")
-                logger.info(f"ROI received: {roi}")
+                logger.error(f"ROI received: {roi}")
             except json.JSONDecodeError as e:
                 logger.error(f"ROI JSON decode error: {e}")
                 return jsonify({'status': 'error', 'message': 'Invalid ROI JSON'}), 400
@@ -482,7 +387,7 @@ def serve_uploaded_file(filename):
         if not os.path.exists(file_path):
             logger.error(f"File not found: {file_path}")
             return jsonify({'error': 'File not found'}), 404
-        logger.info(f"Serving file: {file_path}")
+        logger.error(f"Serving file: {file_path}")
         return send_file(file_path)
     except Exception as e:
         logger.error(f"Error serving file {filename}: {e}")
@@ -500,13 +405,13 @@ def get_status(filename):
         if os.path.exists(video_web_path):
             if os.path.getsize(video_web_path) > 0:
                 processing_status[filename] = {'status': 'completed', 'progress': 1.0, 'message': 'Processing complete'}
-                logger.info(f"Processing complete for {filename}")
+                logger.error(f"Processing complete for {filename}")
                 return jsonify({
                     'status': 'completed',
                     'progress': 1.0,
                     'message': 'Processing complete'
                 })
-        logger.debug(f"Status for {filename}: {status_info}")
+        logger.error(f"Status for {filename}: {status_info}")
         return jsonify({
             'status': status_info.get('status', 'processing'),
             'progress': status_info.get('progress', 0.0),
@@ -527,7 +432,7 @@ def get_video(filename):
         if os.path.getsize(video_path) == 0:
             logger.error(f"Video file is empty: {video_path}")
             return jsonify({'error': 'Video processing not complete'}), 404
-        logger.info(f"Serving video: {video_path}")
+        logger.error(f"Serving video: {video_path}")
         file_size = os.path.getsize(video_path)
         range_header = request.headers.get('Range')
         if range_header:
@@ -572,27 +477,27 @@ def get_video(filename):
 
 @app.route('/results/<filename>/annotations')
 def get_annotations(filename):
-    """Serve or download annotations JSON."""
+    """Serve or download analytics JSON."""
     try:
-        annotations_path = os.path.join(app.config['RESULTS_FOLDER'], os.path.splitext(filename)[0], 'analytics/tracking_data.json')
-        logger.debug(f"Checking annotations: {annotations_path}")
-        if not os.path.exists(annotations_path):
-            logger.error(f"No annotations found at: {annotations_path}")
-            return jsonify({'error': 'Annotations not found'}), 404
-        with open(annotations_path, 'r') as f:
+        analytics_path = os.path.join(app.config['RESULTS_FOLDER'], os.path.splitext(filename)[0], 'analytics.json')
+        logger.error(f"Checking analytics: {analytics_path}")
+        if not os.path.exists(analytics_path):
+            logger.error(f"No analytics found at: {analytics_path}")
+            return jsonify({'error': 'Analytics not found'}), 404
+        with open(analytics_path, 'r') as f:
             data = json.load(f)
-        logger.info(f"Loaded annotations with {len(data)} frames")
+        logger.error(f"Loaded analytics with {len(data.get('object_counts', {}))} frames")
         if request.args.get('download', '0') == '1':
             return send_file(
-                annotations_path,
+                analytics_path,
                 mimetype='application/json',
                 as_attachment=True,
-                download_name=f"annotations_{filename}.json"
+                download_name=f"analytics_{filename}.json"
             )
         return jsonify(data)
     except Exception as e:
-        logger.error(f"Error serving annotations {filename}: {e}")
-        return jsonify({'error': f'Error serving annotations: {str(e)}'}), 500
+        logger.error(f"Error serving analytics {filename}: {e}")
+        return jsonify({'error': f'Error serving analytics: {str(e)}'}), 500
 
 @app.route('/results/<filename>/analytics')
 def serve_analytics(filename):
@@ -601,8 +506,8 @@ def serve_analytics(filename):
         result_dir = os.path.join(app.config['RESULTS_FOLDER'], os.path.splitext(filename)[0])
         mot_file = os.path.join(result_dir, 'analytics/test.txt')
         frames_folder = os.path.join(result_dir, 'frames')
-        if not (os.path.exists(mot_file) and os.path.exists(frames_folder)):
-            logger.error(f"Analytics data missing: MOT={os.path.exists(mot_file)}, Frames={os.path.exists(frames_folder)}")
+        if not os.path.exists(mot_file):
+            logger.error(f"Analytics data missing: MOT={os.path.exists(mot_file)}")
             return jsonify({'error': 'Analytics data not found'}), 404
         video_path = os.path.join(result_dir, 'annotated_video_web.mp4')
         cap = cv2.VideoCapture(video_path)
@@ -621,11 +526,11 @@ def serve_analytics(filename):
         if heatmap_success:
             with open(heatmap_path, 'rb') as f:
                 heatmap_base64 = base64.b64encode(f.read()).decode('utf-8')
-            logger.info(f"Generated heatmap: {heatmap_path}")
+            logger.error(f"Generated heatmap: {heatmap_path}")
         if velocity_heatmap_success:
             with open(velocity_heatmap_path, 'rb') as f:
                 velocity_heatmap_base64 = base64.b64encode(f.read()).decode('utf-8')
-            logger.info(f"Generated velocity heatmap: {velocity_heatmap_path}")
+            logger.error(f"Generated velocity heatmap: {velocity_heatmap_path}")
         top_ids, crops = get_longest_staying_ids(mot_file, frames_folder, top_n=5)
         crops_base64 = []
         for id_crops in crops:
@@ -640,7 +545,7 @@ def serve_analytics(filename):
             object_counts = df.groupby('frame').size().to_dict()
             track_durations = get_track_durations(mot_file)
             avg_velocity = get_average_velocity(mot_file)
-            logger.info(f"Analytics generated: {len(object_counts)} frames, {len(track_durations)} tracks")
+            logger.error(f"Analytics generated: {len(object_counts)} frames, {len(track_durations)} tracks")
         except Exception as e:
             logger.error(f"Error processing MOT file: {e}")
             object_counts = {}

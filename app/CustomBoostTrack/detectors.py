@@ -26,31 +26,22 @@ class Detector(ABC):
 
 
 class YoloDetector(Detector):
-    def __init__(self, yolo_path, conf=None):
-        self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
-        print(f"YoloDetector using device: {self.device}")
-        if self.device == 'cpu':
-            print("Warning: CUDA unavailable, falling back to CPU. Performance will be slower.")
+    def __init__(self, yolo_path, conf = None):
         self.model = YOLO(yolo_path)
         self.conf = conf
 
     def __call__(self, img):
-        if img.shape[2] == 3:
-            img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-        else:
-            img_rgb = img
-        results = self.model(img_rgb, conf=self.conf, device=self.device)[0]
+        if self.conf:
+            results = self.model(img, conf = self.conf)[0] 
+        else:   
+            results = self.model(img)[0]  # Let Ultralytics scale to input resolution
         annotations = []
         for box in results.boxes:
             if int(box.cls) == 0:  # Only keep 'person' class (class ID 0)
                 xyxy = box.xyxy[0].tolist()  # [x_min, y_min, x_max, y_max]
                 conf = box.conf[0].item()
                 annotations.append(xyxy + [conf])
-        
-        # Create tensor but then ensure it's on CPU before returning
-        # This makes it easier to handle in downstream processing
-        result = torch.tensor(annotations, dtype=torch.float32).to(self.device) if annotations else torch.zeros((0, 5), dtype=torch.float32).to(self.device)
-        return result.cpu()  # Always return CPU tensor to avoid conversion issues
+        return torch.tensor(annotations, dtype=torch.float32) if annotations else torch.zeros((0, 5), dtype=torch.float32)
 
 
 # EnsembleDetector remains unchanged as it assumes original resolution inputs

@@ -9,7 +9,7 @@ import cv2
 # Add CustomBoostTrack to sys.path
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-from tracker.boost_track import BoostTrack
+from tracker.boost_trackrt import BoostTrack
 from detectors import YoloDetector, EnsembleDetector
 import dataset
 from default_settings import GeneralSettings, BoostTrackSettings, BoostTrackPlusPlusSettings

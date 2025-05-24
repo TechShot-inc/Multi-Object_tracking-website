@@ -7,6 +7,7 @@ app = Flask(__name__)
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 PROJECT_ROOT = os.path.dirname(BASE_DIR)
 APP_DIR = BASE_DIR
+app.config['APP_DIR'] = APP_DIR
 app.config['UPLOAD_FOLDER'] = os.path.join(PROJECT_ROOT, 'Uploads')
 app.config['RESULTS_FOLDER'] = os.path.join(PROJECT_ROOT, 'results')
 app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024  # 500MB max upload
@@ -15,6 +16,7 @@ app.config['ALLOWED_EXTENSIONS'] = {'mp4', 'avi', 'mov', 'mkv'}
 # Logging paths
 print(f"BASE_DIR: {BASE_DIR}")
 print(f"PROJECT_ROOT: {PROJECT_ROOT}")
+print(f"APP_DIR: {app.config['APP_DIR']}")
 print(f"UPLOAD_FOLDER: {app.config['UPLOAD_FOLDER']}")
 print(f"RESULTS_FOLDER: {app.config['RESULTS_FOLDER']}")
 

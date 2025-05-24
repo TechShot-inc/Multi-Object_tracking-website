@@ -177,7 +177,12 @@ class BoostTrack(object):
         dets[:, :4] /= scale
 
         if self.ecc is not None:
-            transform = self.ecc(img_numpy, self.frame_count, tag)
+            # Ensure image is in BGR format for ECC
+            if img_numpy.shape[2] == 3:
+                ecc_image = cv2.cvtColor(img_numpy, cv2.COLOR_RGB2BGR) if img_numpy.dtype == np.uint8 else img_numpy
+            else:
+                ecc_image = img_numpy
+            transform = self.ecc(ecc_image, self.frame_count, tag)
             for trk in self.trackers:
                 trk.camera_update(transform)
 
