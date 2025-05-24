@@ -56,6 +56,40 @@ class RealTimeTrackingService:
             (233, 30, 99),    # Pink
         ]
             
+    def calculate_area_on_side(self, det, line_x, side, frame_width, frame_height):
+        """Calculate the area of the detection on the specified side of the line."""
+        x, y, w, h = det['x'], det['y'], det['width'], det['height']
+        x1, y1 = x, y
+        x2, y2 = x + w, y + h
+        # Clip coordinates to frame boundaries
+        x1 = max(0, min(x1, frame_width))
+        y1 = max(0, min(y1, frame_height))
+        x2 = max(0, min(x2, frame_width))
+        y2 = max(0, min(y2, frame_height))
+        if x2 <= x1 or y2 <= y1:
+            return 0
+        total_area = (x2 - x1) * (y2 - y1)
+        if total_area <= 0:
+            return 0
+        if side == 'left':
+            # Area left of line_x
+            if x2 <= line_x:
+                return total_area  # Fully left
+            if x1 >= line_x:
+                return 0  # Fully right
+            # Partial overlap: area from x1 to line_x
+            overlap_width = line_x - x1
+            return overlap_width * (y2 - y1)
+        else:  # side == 'right'
+            # Area right of line_x
+            if x1 >= line_x:
+                return total_area  # Fully right
+            if x2 <= line_x:
+                return 0  # Fully left
+            # Partial overlap: area from line_x to x2
+            overlap_width = x2 - line_x
+            return overlap_width * (y2 - y1)
+
     def process_frame(self, frame, roi=None, line=None):
         """Process frame with optional ROI and line crossing detection."""
         frame_height, frame_width = frame.shape[:2]
@@ -139,32 +173,36 @@ class RealTimeTrackingService:
                     
                     # Process detections for line crossing
                     for det in detections:
-                        x, w = det['x'], det['width']
-                        left_edge = x
-                        right_edge = x + w
-                        # Check if detection is a person (assume person if class is None, since YOLO detects person)
+                        # Check if detection is a person
                         det_class = det.get('class')
                         is_person = det_class is None or det_class == 0 or str(det_class).lower() == 'person'
-                        print(f"Checking detection: id={det['id']}, class={det_class}, is_person={is_person}, left_edge={left_edge}, right_edge={right_edge}")
-                        if is_person:
-                            if position == 'left':
-                                # Inside is left side, outside is right side
-                                if right_edge <= line_x:  # Fully left of line
-                                    inside_count += 1
-                                    print(f"Person fully left of line_x={line_x}, inside_count={inside_count}")
-                                elif left_edge >= line_x:  # Fully right of line
-                                    outside_count += 1
-                                    print(f"Person fully right of line_x={line_x}, outside_count={outside_count}")
-                            else:  # position == 'right'
-                                # Inside is right side, outside is left side
-                                if left_edge >= line_x:  # Fully right of line
-                                    inside_count += 1
-                                    print(f"Person fully right of line_x={line_x}, inside_count={inside_count}")
-                                elif right_edge <= line_x:  # Fully left of line
-                                    outside_count += 1
-                                    print(f"Person fully left of line_x={line_x}, outside_count={outside_count}")
-                        else:
+                        print(f"Checking detection: id={det['id']}, class={det_class}, is_person={is_person}")
+                        if not is_person:
                             print(f"Skipping non-person detection: id={det['id']}, class={det_class}")
+                            continue
+                        
+                        # Calculate area on inside side
+                        if position == 'left':
+                            inside_side = 'left'  # Inside is left of line_x
+                        else:  # position == 'right'
+                            inside_side = 'right'  # Inside is right of line_x
+                        
+                        area_on_inside = self.calculate_area_on_side(det, line_x, inside_side, frame_width, frame_height)
+                        total_area = det['width'] * det['height']
+                        if total_area <= 0:
+                            print(f"Skipping detection with invalid area: id={det['id']}, total_area={total_area}")
+                            continue
+                        
+                        area_ratio = area_on_inside / total_area
+                        print(f"Detection id={det['id']}: area_on_inside={area_on_inside}, total_area={total_area}, ratio={area_ratio:.2f}")
+                        
+                        # Count based on 75% threshold
+                        if area_ratio >= 0.75:
+                            inside_count += 1
+                            print(f"Person ≥75% on inside (side={inside_side}, ratio={area_ratio:.2f}), inside_count={inside_count}")
+                        else:
+                            outside_count += 1
+                            print(f"Person <75% on inside (side={inside_side}, ratio={area_ratio:.2f}), outside_count={outside_count}")
                     
                     # Update persistent counts
                     self.persons_inside = inside_count
