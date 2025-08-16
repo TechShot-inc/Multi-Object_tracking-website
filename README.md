@@ -1,108 +1,135 @@
 # Multi-Object Tracking Solution
 
-This project provides a web interface for multi-object tracking in videos, with two main features:
-1. Video upload and offline processing
-2. Real-time object tracking using device cameras
+A web interface for multi-object tracking with two main, separated features:
+- Video upload and offline processing (video.html)
+- Real-time camera tracking (realtime.html)
+
+
+---
 
 ## Features
 
-### Video Upload and Processing
-- Upload video files (MP4, AVI, MOV, MKV)
-- Server-side processing with a tracking pipeline
-- View annotated videos with tracking results
-- Download processed videos and annotations
+- Video upload and server-side tracking pipeline
+  - Upload MP4/AVI/MOV/MKV
+  - Server processing (detection + tracking)
+  - Download annotated video and annotations
+- Real-time tracking using device camera
+  - Webcam access and ROI selection
+  - Server-side detection/tracking endpoint for realtime inference
+  - Live overlay of annotated frames on a canvas
+- Analytics & reporting
+  - Heatmaps, charts and PDF report export
+- Clean UI with Tailwind and modular JS/CSS assets
 
-### Real-Time Tracking
-- Access and select from available camera devices
-- Real-time object detection using TensorFlow.js
-- Object tracking with ID assignment and persistence
-- Performance metrics (FPS, object count)
+---
 
-## Technology Stack
+## Repository layout (relevant files)
 
-### Server-Side
-- Flask (Python web framework)
-- Threading for asynchronous video processing
-- RESTful API endpoints for video management
+- app/
+  - app.py — Flask application factory / routes
+  - realtime.py — Realtime tracking Flask endpoint(s)
+  - video.py — Video upload/processing endpoints
+  - realtimetracking.py — runtime for realtime
+  - templates/
+    - home.html — landing page selector (choose Video vs Realtime)
+    - video.html — video upload & offline processing UI
+    - realtime.html — realtime webcam tracking UI
+  - static/
+    - js/
+      - common.js
+      - upload.js
+      - realtime.js
+    - css/
+      - style.css
+      - premium.css
+- CustomBoostTrack/ 
+- run.py — start script
+- requirements.txt
 
-### Client-Side
-- HTML5, CSS3, and JavaScript
-- TensorFlow.js for in-browser object detection
-- Simplified tracking algorithm (IoU-based with velocity estimation)
-- HTML5 Canvas for visualization
+---
 
-## Setup and Installation
 
-### Prerequisites
-- Python 3.7+
-- Node.js (optional, for development)
 
-### Installation
+## Installation 
 
-1. Clone the repository
+1. Clone the repository:
+   ```
+   git clone https://github.com/TechShot-inc/Multi-Object_tracking-website.git
+   cd Multi-Object_tracking-website
+   ```
+
+2. Create and activate environment (conda recommended):
+   ```
+   conda create -n AICV python=3.11 -y
+   conda activate AICV
+   ```
+
+3. Install Python dependencies:
+   ```
+   pip install -r requirements.txt
+   ```
+
+
+
+## Run the app
+
+From the repository root:
+
 ```
-git clone https://github.com/yourusername/multi-object-tracking.git
-cd multi-object-tracking
+python run.py
 ```
 
-2. Install Python dependencies
+Open your browser to:
 ```
-pip install -r requirements.txt
-```
-
-3. Run the application
-```
-python3 -m app.app
+http://localhost:5001
 ```
 
-4. Open your browser and navigate to `http://localhost:5000`
+(If your Flask config uses a different port, follow the printed URL in the terminal.)
+
+---
 
 ## Usage
 
-### Video Upload
-1. Navigate to the "Video Upload" section
-2. Click "Choose a video file" and select a video from your device
-3. Click "Upload & Process" and wait for processing to complete
-4. View the processed video and download results as needed
+### Homepage
+- The homepage (home.html) acts as a selector. Choose either "Video Upload" or "Real-Time Tracking". Each option opens a dedicated page:
+  - `/video` -> video.html (video upload & processing)
+  - `/realtime` -> realtime.html (camera tracking)
 
-### Real-Time Tracking
-1. Navigate to the "Real-Time Tracking" section
-2. Select a camera from the dropdown menu
-3. Click "Start Tracking" to begin real-time detection and tracking
-4. View object IDs, classes, and tracking statistics
-5. Click "Stop Tracking" when finished
+### Video Upload (video.html)
+1. Upload a supported video file.
+2. Optionally select ROI on the preview.
+3. Configure frame extraction / output speed sliders.
+4. Click "Upload and Process".
+5. After processing, view annotated video, download annotations or PDF report.
 
-## Development
+### Real-Time Tracking (realtime.html)
+1. Allow webcam access when prompted by browser.
+2. Optionally select ROI before starting.
+3. Click "Start Tracking" to begin real-time processing (frames are sent to `/realtime-track`).
+4. Click "Stop Tracking" to end the session and release the camera.
 
-### Project Structure
-```
-app/
-├── static/
-│   ├── css/
-│   │   └── style.css
-│   ├── js/
-│   │   ├── upload.js
-│   │   └── tracking.js
-│   └── models/       # For custom TensorFlow.js models
-├── templates/
-│   └── index.html
-├── uploads/          # Temporary storage for uploaded videos
-├── results/          # Storage for processed videos and annotations
-└── app.py            # Flask application
-```
+---
 
-### Customization
-- To integrate your own tracking pipeline, modify the `process_video()` function in `app.py`
-- To use a custom detection model, replace the COCO-SSD model loading in `tracking.js`
+## Frontend notes
 
-## License
-This project is licensed under the MIT License - see the LICENSE file for details.
+- The UI uses separate templates:
+  - `video.html` contains the whole video upload and report flow.
+  - `realtime.html` contains webcam, ROI canvas, overlay canvas, and start/stop controls.
+- Real-time overlay is drawn to a canvas (`tracking-canvas`) sized to match the video element. If annotated frames flicker or appear delayed, check:
+  - webcam permissions
+  - canvas sizing code (resizeRoiCanvasRealtime)
+  - that `/realtime-track` returns `annotated` base64 JPEG for each frame
+- JS files:
+  - `static/js/realtime.js` — core realtime logic (start/stop, frame capture, ROI)
+  - `static/js/upload.js` — video upload handling
+  - `static/js/common.js` — shared helpers (modal, image utilities)
+  
+---
 
-## Acknowledgments
-- TensorFlow.js team for providing pre-trained models
-- Flask team for the excellent web framework
 
-## Prizes Day Presentation Tips
-- Prepare sample videos for quick demonstrations
-- Test the real-time tracking on the presentation device beforehand
-- Have backup pre-processed videos ready in case of connection issues 
+## Contributors
+
+- Domadios Morcos — https://github.com/DomaMorcos  
+- Ahmed Walaaeldin — https://github.com/Ahmed-Walaaeldin  
+- Omar Hekal — https://github.com/omar-hekal
+
