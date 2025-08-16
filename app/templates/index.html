@@ -1,93 +1,40 @@
 <!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
-
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Multi-Object Tracking Solution</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
-    <!-- Load TensorFlow.js -->
-    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@3.11.0/dist/tf.min.js"></script>
-    <!-- Load KalmanJS -->
-    <script src="https://cdn.jsdelivr.net/npm/kalmanjs@1.1.0/dist/kalman.min.js"></script>
+    <title>Advanced Multi-Object Tracking Solution</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jsPDF/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
 </head>
-
-<body>
-    <header>
-        <h1>Multi-Object Tracking Solution</h1>
-        <nav>
-            <ul>
-                <li><a href="#video-upload">Video Upload</a></li>
-                <li><a href="#real-time-tracking">Real-Time Tracking</a></li>
-            </ul>
-        </nav>
+<body class="bg-gray-50 font-sans antialiased">
+    <header class="bg-gradient-to-r from-blue-900 to-blue-700 text-white py-6 shadow-lg">
+        <div class="container mx-auto px-4">
+            <h1 class="text-4xl font-bold tracking-tight">Multi-Object Tracking</h1>
+        </div>
     </header>
 
-    <main>
-        <section id="video-upload">
-            <h2>Video Upload</h2>
-            <p>Upload a video file to process with our tracking solution.</p>
-
-            <form id="upload-form" enctype="multipart/form-data">
-                <div class="file-input-container">
-                    <input type="file" id="video-file" name="video" accept="video/mp4,video/avi,video/mov,video/mkv">
-                    <label for="video-file">Choose a video file</label>
-                </div>
-                <button type="submit" id="upload-button">Upload & Process</button>
-            </form>
-
-            <div id="upload-status" class="status-container">
-                <div class="status-message"></div>
-                <div class="progress-container">
-                    <div class="progress-bar"></div>
-                </div>
-            </div>
-
-            <div id="results-container" style="display: none;">
-                <h3>Results</h3>
-                <div class="video-result">
-                    <h4>Processed Video</h4>
-                    <video id="result-video" controls></video>
-                </div>
-                <div class="download-options">
-                    <button id="download-video">Download Annotated Video</button>
-                    <button id="download-annotations">Download Annotations</button>
-                </div>
-            </div>
-        </section>
-
-        <section id="real-time-tracking">
-            <h2>Real-Time Tracking</h2>
-            <p>Use your device's camera for real-time object tracking.</p>
-
-            <div class="camera-controls">
-                <label for="camera-select">Select Camera:</label>
-                <select id="camera-select">
-                    <option value="">Loading cameras...</option>
-                </select>
-                <button id="start-tracking">Start Tracking</button>
-                <button id="stop-tracking" disabled>Stop Tracking</button>
-            </div>
-
-            <div class="video-container">
-                <video id="camera-feed" autoplay muted playsinline></video>
-                <canvas id="tracking-overlay"></canvas>
-            </div>
-
-            <div class="tracking-stats">
-                <div>Detected Objects: <span id="object-count">0</span></div>
-                <div>FPS: <span id="fps">0</span></div>
+    <main class="container mx-auto px-4 py-10">
+        <section class="bg-white p-8 rounded-xl shadow-xl">
+            <h2 class="text-2xl font-semibold text-blue-900 mb-6">Choose Tracking Mode</h2>
+            <div class="flex flex-col space-y-4 md:flex-row md:space-y-0 md:space-x-4">
+                <a href="/video" class="px-6 py-3 bg-blue-900 text-white text-center rounded-lg hover:bg-blue-800 transition">Video Tracking</a>
+                <a href="/realtime" class="px-6 py-3 bg-teal-500 text-white text-center rounded-lg hover:bg-teal-600 transition">Real-Time Tracking</a>
             </div>
         </section>
     </main>
 
-    <footer>
-        <p>&copy; 2023 Multi-Object Tracking Solution</p>
-    </footer>
+    <div id="modal" class="fixed inset-0 bg-gray-800 bg-opacity-75 flex items-center justify-center hidden">
+        <div class="bg-white p-8 rounded-xl shadow-2xl max-w-md w-full">
+            <p id="modal-message" class="text-gray-700 text-lg"></p>
+            <button class="mt-6 px-4 py-2 bg-blue-900 text-white rounded-lg hover:bg-blue-800 transition" onclick="document.getElementById('modal').classList.add('hidden')">Close</button>
+        </div>
+    </div>
 
-    <!-- Load custom scripts -->
-    <script src="{{ url_for('static', filename='js/upload.js') }}"></script>
-    <script src="{{ url_for('static', filename='js/tracking.js') }}"></script>
+    <script src="/static/js/common.js"></script>
 </body>
-
 </html>
