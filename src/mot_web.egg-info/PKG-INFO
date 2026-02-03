@@ -4,3 +4,5 @@ Version: 0.1.0
 Summary: Multi-object tracking web application
 Requires-Python: >=3.10
 Requires-Dist: flask>=3.0
+Provides-Extra: dev
+Requires-Dist: pytest>=8; extra == "dev"

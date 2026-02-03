@@ -517,10 +517,16 @@ src/mot_web/config.py
 src/mot_web.egg-info/PKG-INFO
 src/mot_web.egg-info/SOURCES.txt
 src/mot_web.egg-info/dependency_links.txt
+src/mot_web.egg-info/entry_points.txt
 src/mot_web.egg-info/requires.txt
 src/mot_web.egg-info/top_level.txt
 src/mot_web/domain/schemas.py
 src/mot_web/domain/types.py
+src/mot_web/legacy/app_legacy.py
+src/mot_web/legacy/realtime_legacy.py
+src/mot_web/legacy/realtimetracking_legacy.py
+src/mot_web/legacy/tracking_legacy.py
+src/mot_web/legacy/video_legacy.py
 src/mot_web/services/analytics_service.py
 src/mot_web/services/report_service.py
 src/mot_web/services/tracking_service.py
@@ -530,7 +536,10 @@ src/mot_web/utils/images.py
 src/mot_web/utils/io.py
 src/mot_web/utils/timing.py
 src/mot_web/web/routes/health.py
+src/mot_web/web/routes/index.py
 src/mot_web/web/routes/realtime.py
 src/mot_web/web/routes/video.py
 tests/test_pipeline_contract.py
 tests/test_routes.py
+tests/test_video_run.py
+tests/test_video_upload.py
