@@ -3,8 +3,14 @@ var/
 *.mp4
 *.avi
 *.json
-CustomBoosttrack/
 
+CustomBoosttrack/
 
 __pycache__/
 *.pyc
+
+.env
+*.egg-info/
+dist/
+build/
+.conda/
