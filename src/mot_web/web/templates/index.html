@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Advanced Multi-Object Tracking Solution</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="{{ url_for('static', filename='vendor/jspdf/jspdf.umd.min.js') }}"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+</head>
+<body class="bg-gray-50 font-sans antialiased">
+    <header class="bg-gradient-to-r from-blue-900 to-blue-700 text-white py-6 shadow-lg">
+        <div class="container mx-auto px-4">
+            <h1 class="text-4xl font-bold tracking-tight">Multi-Object Tracking</h1>
+        </div>
+    </header>
+
+    <main class="container mx-auto px-4 py-10">
+        <section class="bg-white p-8 rounded-xl shadow-xl">
+            <h2 class="text-2xl font-semibold text-blue-900 mb-6">Choose Tracking Mode</h2>
+            <div class="flex flex-col space-y-4 md:flex-row md:space-y-0 md:space-x-4">
+                <a href="/video" class="px-6 py-3 bg-blue-900 text-white text-center rounded-lg hover:bg-blue-800 transition">Video Tracking</a>
+                <a href="/realtime" class="px-6 py-3 bg-teal-500 text-white text-center rounded-lg hover:bg-teal-600 transition">Real-Time Tracking</a>
+            </div>
+        </section>
+    </main>
+
+    <div id="modal" class="fixed inset-0 bg-gray-800 bg-opacity-75 flex items-center justify-center hidden">
+        <div class="bg-white p-8 rounded-xl shadow-2xl max-w-md w-full">
+            <p id="modal-message" class="text-gray-700 text-lg"></p>
+            <button class="mt-6 px-4 py-2 bg-blue-900 text-white rounded-lg hover:bg-blue-800 transition" onclick="document.getElementById('modal').classList.add('hidden')">Close</button>
+        </div>
+    </div>
+
+    <script src="/static/js/common.js"></script>
+</body>
+</html>

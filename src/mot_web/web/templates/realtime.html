@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Real-Time Tracking - Multi-Object Tracking</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="{{ url_for('static', filename='vendor/jspdf/jspdf.umd.min.js') }}"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+</head>
+<body class="bg-gray-50 font-sans antialiased">
+    <header class="bg-gradient-to-r from-blue-900 to-blue-700 text-white py-6 shadow-lg">
+        <div class="container mx-auto px-4">
+            <h1 class="text-4xl font-bold tracking-tight">Real-Time Tracking</h1>
+            <nav class="mt-4 flex space-x-4">
+                <a href="/" class="px-4 py-2 text-lg font-medium hover:bg-blue-600 rounded-lg transition">Home</a>
+            </nav>
+        </div>
+    </header>
+
+    <main class="container mx-auto px-4 py-10">
+        <section id="realtime-section" class="bg-white p-8 rounded-xl shadow-xl">
+            <h2 class="text-2xl font-semibold text-blue-900 mb-6">Real-Time Tracking</h2>
+            <div class="mb-6">
+                <label class="block text-sm font-medium text-gray-700">Region of Interest (ROI)</label>
+                <p class="text-sm text-gray-500">Optionally draw a rectangle on the video to limit tracking to that area.</p>
+                <div class="mt-2 flex space-x-3">
+                    <button type="button" id="select-roi-realtime" class="px-4 py-2 bg-teal-500 text-white rounded-lg hover:bg-teal-600 transition">Select ROI</button>
+                    <button type="button" id="clear-roi-realtime" disabled class="px-4 py-2 bg-gray-300 text-gray-700 rounded-lg">Clear ROI</button>
+                </div>
+                <!-- Line Selection -->
+                <label class="block text-sm font-medium text-gray-700 mt-4">Line Crossing Detection</label>
+                <p class="text-sm text-gray-500">Draw a vertical line and select side for counting people entering/exiting.</p>
+                <div class="mt-2 flex space-x-3">
+                    <button type="button" id="draw-line" class="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition">Draw Line</button>
+                    <button type="button" id="clear-line" disabled class="px-4 py-2 bg-gray-300 text-gray-700 rounded-lg">Clear Line</button>
+                </div>
+                <div class="mt-2 flex space-x-4">
+                    <label class="inline-flex items-center">
+                        <input type="radio" name="line-position" value="left" class="form-radio text-teal-500" checked>
+                        <span class="ml-2 text-sm text-gray-700">Left Line (Inside: Left)</span>
+                    </label>
+                    <label class="inline-flex items-center">
+                        <input type="radio" name="line-position" value="right" class="form-radio text-teal-500">
+                        <span class="ml-2 text-sm text-gray-700">Right Line (Inside: Right)</span>
+                    </label>
+                </div>
+                <!-- Count Display -->
+                <div class="mt-2 flex space-x-4">
+                    <span class="text-sm text-gray-700">Persons Inside: <span id="persons-inside">0</span></span>
+                    <span class="text-sm text-gray-700">Persons Outside: <span id="persons-outside">0</span></span>
+                </div>
+                <!-- Video Container -->
+                <div class="relative mt-4">
+                    <div class="relative w-full flex items-center justify-center" style="height: 720px; background: transparent;">
+                        <div class="relative" style="width: fit-content; height: fit-content;">
+                            <video id="realtime-video" autoplay muted playsinline class="rounded-lg"></video>
+                            <canvas id="tracking-canvas" class="absolute top-0 left-0 rounded-lg pointer-events-none" style="z-index: 10; border: none;"></canvas>
+                            <canvas id="roi-canvas-realtime" class="absolute top-0 left-0 rounded-lg" style="z-index: 15; border: none;"></canvas>
+                            <canvas id="line-canvas" class="absolute top-0 left-0 rounded-lg pointer-events-none" style="z-index: 12; border: none;"></canvas>
+                            <div id="realtime-loading" class="absolute inset-0 flex items-center justify-center bg-black bg-opacity-50 hidden" style="z-index: 20;">
+                                <div class="animate-spin h-8 w-8 border-4 border-teal-500 border-t-transparent rounded-full"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="flex space-x-3" style="z-index: 30; position: relative;">
+                <button id="start-tracking" class="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition">Start Tracking</button>
+                <button id="stop-tracking" disabled class="px-6 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition">Stop Tracking</button>
+            </div>
+            <div id="realtime-status" class="mt-6">
+                <p class="status-message text-gray-600">Ready to start tracking</p>
+            </div>
+            <script>
+                document.addEventListener('DOMContentLoaded', function() {
+                    const startTrackingBtn = document.getElementById('start-tracking');
+                    const stopTrackingBtn = document.getElementById('stop-tracking');
+                    const realtimeLoading = document.getElementById('realtime-loading');
+                    const realtimeVideo = document.getElementById('realtime-video');
+                    let trackingActive = false;
+
+                    startTrackingBtn.addEventListener('click', function() {
+                        console.log('Start Tracking button clicked');
+                        trackingActive = true;
+                        startTrackingBtn.disabled = true;
+                        stopTrackingBtn.disabled = false;
+                        realtimeLoading.classList.add('hidden');
+                        startTracking();
+                    });
+
+                    stopTrackingBtn.addEventListener('click', function() {
+                        trackingActive = false;
+                        startTrackingBtn.disabled = false;
+                        stopTrackingBtn.disabled = true;
+                        realtimeLoading.classList.add('hidden');
+                        stopTracking();
+                    });
+                });
+            </script>
+        </section>
+    </main>
+
+    <div id="modal" class="fixed inset-0 bg-gray-800 bg-opacity-75 flex items-center justify-center hidden">
+        <div class="bg-white p-8 rounded-xl shadow-2xl max-w-md w-full">
+            <p id="modal-message" class="text-gray-700 text-lg"></p>
+            <button class="mt-6 px-4 py-2 bg-blue-900 text-white rounded-lg hover:bg-blue-800 transition" onclick="document.getElementById('modal').classList.add('hidden')">Close</button>
+        </div>
+    </div>
+
+    <script src="/static/js/common.js"></script>
+    <script src="/static/js/realtime.js"></script>
+</body>
+</html>

@@ -1,0 +1,10 @@
+var/
+*.log
+*.mp4
+*.avi
+*.json
+CustomBoosttrack/
+
+
+__pycache__/
+*.pyc
