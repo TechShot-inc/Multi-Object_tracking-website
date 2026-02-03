@@ -249,43 +249,85 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    // Store current job info
+    let currentJobId = null;
+    let currentFilename = null;
+
     uploadForm.addEventListener('submit', async (e) => {
         e.preventDefault();
         const formData = new FormData(uploadForm);
+        
+        // Collect ROI data for later use in run request
+        let roiData = null;
         if (window.roiUpload && window.roiUpload.width > 0 && window.roiUpload.height > 0) {
-            const roiData = {
+            roiData = {
                 x: window.roiUpload.x,
                 y: window.roiUpload.y,
                 width: window.roiUpload.width,
                 height: window.roiUpload.height
             };
-            console.log('Sending ROI data:', roiData);
-            formData.append('roi', JSON.stringify(roiData));
+            console.log('ROI data collected:', roiData);
         } else {
             console.log('No valid ROI selected');
         }
+        
         uploadButton.disabled = true;
         statusMessage.textContent = 'Uploading...';
         progressBar.style.width = '10%';
         progressBar.setAttribute('aria-valuenow', 10);
 
         try {
-            const response = await fetch('/upload', {
+            // Step 1: Upload the video
+            const uploadResponse = await fetch('/video/upload', {
                 method: 'POST',
                 body: formData
             });
-            if (!response.ok) {
-                throw new Error(`Upload failed: ${response.statusText}`);
+            if (!uploadResponse.ok) {
+                const errorData = await uploadResponse.json().catch(() => ({}));
+                throw new Error(errorData.error || `Upload failed: ${uploadResponse.statusText}`);
             }
-            const data = await response.json();
-            console.log('Upload response:', data);
-            if (data.status === 'success') {
+            const uploadData = await uploadResponse.json();
+            console.log('Upload response:', uploadData);
+            
+            if (!uploadData.job_id) {
+                throw new Error('No job_id returned from upload');
+            }
+            
+            currentJobId = uploadData.job_id;
+            currentFilename = uploadData.filename;
+            
+            statusMessage.textContent = 'Starting processing...';
+            progressBar.style.width = '20%';
+            progressBar.setAttribute('aria-valuenow', 20);
+            
+            // Step 2: Start processing
+            const runResponse = await fetch(`/video/run/${currentJobId}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ roi: roiData })
+            });
+            
+            if (!runResponse.ok) {
+                const errorData = await runResponse.json().catch(() => ({}));
+                throw new Error(errorData.error || `Processing failed: ${runResponse.statusText}`);
+            }
+            
+            const runData = await runResponse.json();
+            console.log('Run response:', runData);
+            
+            if (runData.state === 'done') {
+                statusMessage.textContent = 'Processing complete!';
+                progressBar.style.width = '100%';
+                progressBar.setAttribute('aria-valuenow', 100);
+                await displayResults(currentJobId);
+            } else if (runData.state === 'failed') {
+                throw new Error(runData.error || 'Processing failed');
+            } else {
+                // Poll for status if not immediately done
                 statusMessage.textContent = 'Processing video...';
                 progressBar.style.width = '30%';
                 progressBar.setAttribute('aria-valuenow', 30);
-                await pollStatus(data.filename);
-            } else {
-                throw new Error(data.message || 'Upload failed');
+                await pollStatus(currentJobId);
             }
         } catch (error) {
             console.error('Upload error:', error);
@@ -294,68 +336,55 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    async function pollStatus(filename) {
+    async function pollStatus(jobId) {
         try {
-            const response = await fetch(`/results/${filename}/status`);
+            const response = await fetch(`/video/status/${jobId}`);
             if (!response.ok) {
                 throw new Error(`Status check failed: ${response.statusText}`);
             }
             const data = await response.json();
             console.log('Status:', data);
-            if (data.status === 'completed') {
-                const videoResponse = await fetch(`/results/${filename}/video`);
-                if (!videoResponse.ok) {
-                    console.log('Video not ready yet, continuing to poll...');
-                    await new Promise(resolve => setTimeout(resolve, 2000));
-                    return pollStatus(filename);
-                }
+            
+            if (data.state === 'done') {
                 statusMessage.textContent = 'Processing complete!';
                 progressBar.style.width = '100%';
                 progressBar.setAttribute('aria-valuenow', 100);
-                await displayResults(filename);
-            } else if (data.status === 'error') {
+                await displayResults(jobId);
+            } else if (data.state === 'failed') {
                 throw new Error(data.message || 'Processing failed');
-            } else if (data.status === 'processing') {
+            } else if (data.state === 'running' || data.state === 'created') {
                 statusMessage.textContent = data.message || 'Processing...';
-                const progress = data.progress || 0;
-                progressBar.style.width = `${progress * 100}%`;
-                progressBar.setAttribute('aria-valuenow', progress * 100);
+                progressBar.style.width = '50%';
+                progressBar.setAttribute('aria-valuenow', 50);
                 await new Promise(resolve => setTimeout(resolve, 2000));
-                await pollStatus(filename);
+                await pollStatus(jobId);
+            } else if (data.state === 'not_found') {
+                throw new Error('Job not found');
             } else {
                 throw new Error(data.message || 'Unknown processing status');
             }
         } catch (error) {
             console.error('Status check error:', error);
-            if (error.message.includes('Video not ready') || error.message.includes('Video processing not complete')) {
-                await new Promise(resolve => setTimeout(resolve, 2000));
-                await pollStatus(filename);
-            } else {
-                showModal(`Error processing video: ${error.message}`);
-                resetUploadForm();
-            }
+            showModal(`Error processing video: ${error.message}`);
+            resetUploadForm();
         }
     }
 
-    async function displayResults(filename) {
+    async function displayResults(jobId) {
         try {
             resultsContainer.classList.remove('hidden');
-            resultVideo.src = `/results/${filename}/video`;
+            
+            // Try to load the annotated video if it exists, otherwise show message
+            resultVideo.src = `/video/results/${jobId}/video`;
             resultVideo.load();
             resultVideo.controls = true;
-            await new Promise((resolve, reject) => {
-                const timeout = setTimeout(() => {
-                    reject(new Error('Video loading timed out after 60 seconds'));
-                }, 60000);
-                resultVideo.onloadeddata = () => {
-                    clearTimeout(timeout);
-                    resolve();
-                };
-                resultVideo.onerror = () => {
-                    clearTimeout(timeout);
-                    reject(new Error('Failed to load video'));
-                };
-            });
+            
+            // Don't fail if video isn't ready - the stub doesn't produce video
+            resultVideo.onerror = () => {
+                console.log('Annotated video not available (stub mode)');
+                resultVideo.style.display = 'none';
+            };
+            
             replayButton.onclick = () => {
                 resultVideo.currentTime = 0;
                 resultVideo.play();
@@ -363,8 +392,8 @@ document.addEventListener('DOMContentLoaded', () => {
             downloadVideoButton.onclick = (e) => {
                 e.preventDefault();
                 const link = document.createElement('a');
-                link.href = `/results/${filename}/video?download=1`;
-                link.download = filename;
+                link.href = `/video/results/${jobId}/video?download=1`;
+                link.download = currentFilename || 'video.mp4';
                 document.body.appendChild(link);
                 link.click();
                 document.body.removeChild(link);
@@ -372,19 +401,19 @@ document.addEventListener('DOMContentLoaded', () => {
             downloadAnnotationsButton.onclick = (e) => {
                 e.preventDefault();
                 const link = document.createElement('a');
-                link.href = `/results/${filename}/annotations?download=1`;
-                link.download = `${filename.split('.')[0]}_annotations.json`;
+                link.href = `/video/results/${jobId}/annotations`;
+                link.download = `${jobId}_annotations.json`;
                 document.body.appendChild(link);
                 link.click();
                 document.body.removeChild(link);
             };
-            await fetchAnalytics(filename);
+            await fetchAnalytics(jobId);
             resetUploadForm();
         } catch (error) {
             console.error('Error displaying results:', error);
             if (error.message.includes('Video loading timed out') || error.message.includes('Failed to load video')) {
                 await new Promise(resolve => setTimeout(resolve, 2000));
-                await pollStatus(filename);
+                await pollStatus(jobId);
             } else {
                 showModal(`Error displaying results: ${error.message}`);
                 resetUploadForm();
@@ -392,15 +421,18 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    async function fetchAnalytics(filename) {
+    async function fetchAnalytics(jobId) {
         try {
-            const response = await fetch(`/results/${filename}/analytics`);
+            const response = await fetch(`/video/results/${jobId}/analytics`);
             if (!response.ok) {
-                throw new Error(`Analytics fetch failed: ${response.statusText}`);
+                // Analytics may not be available in stub mode
+                console.log('Analytics not available');
+                return;
             }
             const data = await response.json();
             if (data.error) {
-                throw new Error(data.error);
+                console.log('Analytics error:', data.error);
+                return;
             }
             if (data.heatmap) {
                 heatmapImage.src = `data:image/png;base64,${data.heatmap}`;
