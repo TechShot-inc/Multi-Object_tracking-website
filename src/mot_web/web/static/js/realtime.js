@@ -185,8 +185,8 @@ function processFrames(timestamp) {
             }
 
             try {
-                console.log('Sending frame to /realtime-track');
-                const response = await fetch('/realtime-track', {
+                console.log('Sending frame to /realtime/track');
+                const response = await fetch('/realtime/track', {
                     method: 'POST',
                     body: formData
                 });
