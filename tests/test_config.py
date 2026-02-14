@@ -27,6 +27,9 @@ class TestSettings:
             upload_dir=Path("./uploads"),
             results_dir=Path("./results"),
             max_upload_mb=100,
+            queue_mode="inline",
+            redis_url=None,
+            triton_url=None,
         )
         with pytest.raises(Exception):  # FrozenInstanceError
             settings.port = 8080  # type: ignore

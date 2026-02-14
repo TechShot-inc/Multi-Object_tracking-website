@@ -1,0 +1,136 @@
+# Development guide
+
+This document is the “how to work on this repo” reference: local setup, Docker workflows, tests, and common dev loops.
+
+## What you are building
+
+This project is a FastAPI web application (templates + static UI) that runs a multi-object tracking pipeline.
+
+Two main user flows:
+
+- **Offline / video upload**: upload a video, run a tracking job, download annotated output and JSON artifacts.
+- **Realtime / webcam**: browser streams JPEG frames over WebSocket; backend returns metadata + an annotated JPEG preview.
+
+## Repo layout (high level)
+
+- `src/mot_web/`: FastAPI app, routes, worker, queue, tracking pipeline glue.
+- `CustomBoostTrack/`: tracking implementation and detector backends.
+- `docker/`: Compose + Dockerfile targets.
+- `models/`: local weights (mounted read-only into containers).
+- `models_repo/`: Triton model repository (ONNXRuntime backend).
+- `docs/`: project documentation.
+
+## Prerequisites
+
+### Docker (recommended)
+
+- Docker Engine + Docker Compose v2.
+- If using GPU/Triton: NVIDIA driver + NVIDIA Container Toolkit.
+
+### Local Python (optional)
+
+Local development is supported, but most contributors use Docker.
+
+- Python >= 3.10
+- `uv` (used by the Dockerfile)
+
+## Running the app (Docker)
+
+### 1) Put model weights in place
+
+The ML containers expect weights under `models/` (or via env vars pointing elsewhere).
+
+Minimum for local (non-Triton) detector:
+
+- `models/yolo11x.pt`
+- `models/yolo12x.pt`
+- `models/osnet_ain_ms_m_c.pth.tar`
+
+### 2) Start CPU stack
+
+```bash
+docker compose -f docker/compose.yml up -d --build
+```
+
+Open:
+
+- Web UI: `http://localhost:5000`
+
+### 3) Start Triton + GPU stack
+
+```bash
+DETECTOR_BACKEND=triton \
+  docker compose -f docker/compose.yml -f docker/compose.gpu.yml --profile triton up -d --build
+```
+
+Health checks:
+
+- Web UI: `http://localhost:5000`
+- Triton HTTP ready: `http://localhost:8000/v2/health/ready`
+
+Notes:
+
+- `mot-web-dev` proxies `/realtime/ws` to `mot-realtime` when `REALTIME_BACKEND_WS` is set (Compose does this).
+- When using Triton, realtime should rely on Triton for GPU inference; the `mot-realtime` container is intentionally configured to avoid stealing VRAM.
+
+## Common development loops
+
+### Frontend iteration (JS/CSS)
+
+- Static assets are served from `src/mot_web/web/static/`.
+- In dev mode, static responses are set to `Cache-Control: no-store` to reduce stale asset issues.
+
+### Backend iteration (FastAPI)
+
+The `mot-web` entrypoint runs Uvicorn with reload when `ENV=dev`.
+
+See:
+
+- `src/mot_web/__main__.py`
+- `src/mot_web/app_factory.py`
+
+### Realtime tuning loop
+
+Most realtime knobs are environment variables. You can set them and recreate `mot-realtime`.
+
+Example (reduce false positives):
+
+```bash
+export REALTIME_ENSEMBLE_CONF=0.7
+docker compose -f docker/compose.yml up -d --no-deps --build mot-realtime
+```
+
+See full list: `docs/configuration.md`.
+
+## Tests
+
+### Run unit/integration tests (Docker)
+
+```bash
+docker compose -f docker/compose.yml run --rm mot-tests
+```
+
+### Triton integration tests
+
+There is a Triton profile test container.
+
+```bash
+export TRITON_MODEL_REPO_REF='ghcr.io/<you>/<repo>@sha256:<digest>'
+DETECTOR_BACKEND=triton \
+  docker compose -f docker/compose.yml --profile triton-itest up \
+  --abort-on-container-exit --exit-code-from mot-triton-itests mot-triton-itests
+```
+
+## Code style and conventions
+
+- Prefer small, targeted changes.
+- Any new tunable should:
+  - be wired via env vars in Compose when appropriate
+  - have a default
+  - be documented in `docs/configuration.md`
+
+## Useful commands
+
+- Tail logs: `docker logs -f mot-realtime`
+- Recreate a service: `docker compose up -d --no-deps --build mot-realtime`
+- Check env inside a container: `docker exec mot-realtime printenv | sort`

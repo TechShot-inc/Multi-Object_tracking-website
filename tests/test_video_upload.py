@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from mot_web.app_factory import create_app
+from fastapi.testclient import TestClient
 
 
 @pytest.fixture()
@@ -19,25 +20,24 @@ def app(tmp_path: Path):
     os.environ["ENV"] = "dev"
 
     app = create_app()
-    app.config["TESTING"] = True
     return app
 
 
 def test_video_upload_creates_job_and_saves_file(app):
-    client = app.test_client()
+    client = TestClient(app)
 
-    data = {
-        "file": (BytesIO(b"fake video bytes"), "test.mp4")
-    }
-    resp = client.post("/video/upload", data=data, content_type="multipart/form-data")
+    resp = client.post(
+        "/video/upload",
+        files={"file": ("test.mp4", b"fake video bytes", "video/mp4")},
+    )
     assert resp.status_code == 200
-    payload = resp.get_json()
+    payload = resp.json()
     assert "job_id" in payload
     assert payload["filename"] == "test.mp4"
 
     job_id = payload["job_id"]
 
-    settings = app.config["SETTINGS"]
+    settings = app.state.settings
     saved = settings.upload_dir / "test.mp4"
     assert saved.exists()
     assert saved.read_bytes() == b"fake video bytes"
@@ -45,14 +45,16 @@ def test_video_upload_creates_job_and_saves_file(app):
     # status should exist
     st = client.get(f"/video/status/{job_id}")
     assert st.status_code == 200
-    st_json = st.get_json()
+    st_json = st.json()
     assert st_json["job_id"] == job_id
     assert st_json["filename"] == "test.mp4"
     assert st_json["state"] in {"created", "unknown"}  # created if status.json exists
 
 
 def test_video_upload_rejects_bad_extension(app):
-    client = app.test_client()
-    data = {"file": (BytesIO(b"nope"), "bad.txt")}
-    resp = client.post("/video/upload", data=data, content_type="multipart/form-data")
+    client = TestClient(app)
+    resp = client.post(
+        "/video/upload",
+        files={"file": ("bad.txt", b"nope", "text/plain")},
+    )
     assert resp.status_code == 400

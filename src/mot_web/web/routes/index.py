@@ -1,8 +1,9 @@
 from __future__ import annotations
-from flask import Blueprint, render_template
+from fastapi import APIRouter, Request
+from fastapi.responses import HTMLResponse
 
-bp = Blueprint("index", __name__)
+router = APIRouter()
 
-@bp.get("/")
-def home():
-    return render_template("index.html")
+@router.get("/", response_class=HTMLResponse)
+def home(request: Request):
+    return request.app.state.templates.TemplateResponse("index.html", {"request": request})

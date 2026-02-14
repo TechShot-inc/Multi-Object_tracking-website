@@ -4,6 +4,17 @@ var/
 *.avi
 *.json
 
+# Large model artifacts / exports
+models/
+models_repo/
+artifacts/
+*.pt
+*.onnx
+*.engine
+*.tar.gz
+*.pth
+*.pth.tar
+
 CustomBoosttrack/
 
 __pycache__/
@@ -14,3 +25,4 @@ __pycache__/
 dist/
 build/
 .conda/
+.venv/

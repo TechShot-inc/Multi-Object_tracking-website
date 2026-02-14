@@ -1,0 +1,28 @@
+# Optional GPU override for Docker Compose (requires NVIDIA Container Toolkit)
+# Usage:
+#   DETECTOR_BACKEND=triton \
+#   TRITON_MODEL_REPO_REF='ghcr.io/<you>/<repo>@sha256:<digest>' \
+#   docker compose -f docker/compose.yml -f docker/compose.gpu.yml --profile triton up -d --build
+
+services:
+  mot-worker:
+    build:
+      target: worker-cuda
+      args:
+        CUDA_BASE_IMAGE: ${CUDA_BASE_IMAGE:-nvidia/cuda:12.4.1-runtime-ubuntu22.04}
+        TORCH_INDEX_URL: ${TORCH_INDEX_URL:-}
+    gpus: all
+
+  mot-realtime:
+    build:
+      target: worker-cuda
+      args:
+        CUDA_BASE_IMAGE: ${CUDA_BASE_IMAGE:-nvidia/cuda:12.4.1-runtime-ubuntu22.04}
+        TORCH_INDEX_URL: ${TORCH_INDEX_URL:-}
+    environment:
+      # mot-realtime should remain CPU-only when DETECTOR_BACKEND=triton.
+      # Keeping CUDA visible here can steal VRAM (e.g. ReID embedding) and cause Triton OOM.
+      - CUDA_VISIBLE_DEVICES=
+
+  triton:
+    gpus: all

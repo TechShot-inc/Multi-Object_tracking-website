@@ -1,4 +1,22 @@
-flask>=3.0
+fastapi>=0.111
+uvicorn[standard]>=0.27
+python-multipart>=0.0.9
+jinja2>=3.1
+numpy>=1.24
+opencv-python>=4.8
 
 [dev]
 pytest>=8
+httpx>=0.25
+
+[ml]
+ultralytics>=8.0
+torch>=2.0
+torchvision>=0.15
+torchreid>=0.2.5
+gdown>=5.1.0
+tensorboard>=2.14
+ensemble-boxes>=1.0.9
+lap>=0.4.0
+pandas>=2.0
+scipy>=1.10

@@ -1,24 +1,28 @@
 #!/usr/bin/env python3
-"""
-Download pre-trained model weights for Multi-Object Tracking.
+"""scripts/download_models.py
 
-This script downloads the required model weights for:
-- YOLOX: Object detection
-- FastReID: Person re-identification
-- BoostTrack: Tracking model weights
+Download pre-trained model weights used by this repository.
 
-Usage:
-    python scripts/download_models.py
-    python scripts/download_models.py --models yolox fastreid
-    python scripts/download_models.py --output-dir /path/to/weights
+Supports both direct HTTP(S) links and Google Drive share links.
+
+Default output directory:
+    - <project-root>/models
+
+Examples:
+    python scripts/download_models.py --list
+    python scripts/download_models.py --models yolo11 yolo12 osnet
+    python scripts/download_models.py --output-dir ./models --force
 """
 
 from __future__ import annotations
 
 import argparse
 import hashlib
+import re
 import sys
 import urllib.request
+import urllib.parse
+import http.cookiejar
 from pathlib import Path
 from typing import NamedTuple
 
@@ -33,39 +37,31 @@ class ModelInfo(NamedTuple):
 
 # Model registry - add new models here
 MODELS: dict[str, ModelInfo] = {
-    "yolox_x": ModelInfo(
-        name="YOLOX-X (MOT17)",
-        url="https://github.com/Megvii-BaseDetection/YOLOX/releases/download/0.1.1rc0/yolox_x.pth",
-        filename="yolox_x.pth",
-        sha256=None,  # Add checksum if known
-        subdir="yolox",
-    ),
-    "yolox_x_mot20": ModelInfo(
-        name="YOLOX-X (MOT20)",
-        url="https://github.com/Megvii-BaseDetection/YOLOX/releases/download/0.1.1rc0/yolox_x.pth",
-        filename="yolox_x_mot20.pth",
+    "osnet": ModelInfo(
+        name="OSNet-AIN ReID (osnet_ain_ms_m_c)",
+        url="https://drive.google.com/file/d/14lzvwlPPCVr7Ldseu17ga7vo4QMURQ67/view?usp=sharing",
+        filename="osnet_ain_ms_m_c.pth.tar",
         sha256=None,
-        subdir="yolox",
+        subdir=".",
     ),
-    # FastReID models - placeholder URLs, replace with actual model hosting
-    "fastreid_mot17": ModelInfo(
-        name="FastReID SBS-S50 (MOT17)",
-        url="",  # Add actual URL when available
-        filename="mot17_sbs_S50.pth",
+    "yolo11": ModelInfo(
+        name="YOLO11 (ensemble detector #1)",
+        url="https://drive.google.com/file/d/1Skoy3bODg1EHwUi7IAdXJ9X0D5HDHTyv/view?usp=sharing",
+        filename="yolo11x.pt",
         sha256=None,
-        subdir="fastreid",
+        subdir=".",
     ),
-    "fastreid_mot20": ModelInfo(
-        name="FastReID SBS-S50 (MOT20)",
-        url="",  # Add actual URL when available
-        filename="mot20_sbs_S50.pth",
+    "yolo12": ModelInfo(
+        name="YOLO12 (ensemble detector #2)",
+        url="https://drive.google.com/file/d/1-9gkRRWnWGv7ZI4O3qS9UoarUrGlaPZs/view?usp=sharing",
+        filename="yolo12x.pt",
         sha256=None,
-        subdir="fastreid",
+        subdir=".",
     ),
 }
 
 # Default models to download
-DEFAULT_MODELS = ["yolox_x"]
+DEFAULT_MODELS = ["yolo11", "yolo12", "osnet"]
 
 
 def get_project_root() -> Path:
@@ -82,11 +78,141 @@ def compute_sha256(filepath: Path) -> str:
     return sha256_hash.hexdigest()
 
 
+def _extract_gdrive_file_id(url: str) -> str | None:
+    """Extract a Google Drive file id from common share URL formats."""
+    if "drive.google.com" not in url:
+        return None
+
+    # Format: https://drive.google.com/file/d/<id>/view?...
+    marker = "/file/d/"
+    if marker in url:
+        tail = url.split(marker, 1)[1]
+        file_id = tail.split("/", 1)[0]
+        return file_id or None
+
+    # Format: https://drive.google.com/open?id=<id>
+    try:
+        parsed = urllib.parse.urlparse(url)
+        qs = urllib.parse.parse_qs(parsed.query)
+        file_id = (qs.get("id") or [None])[0]
+        return file_id
+    except Exception:
+        return None
+
+
+def _download_google_drive(url: str, dest: Path, desc: str = "") -> bool:
+    """Download a Google Drive file, handling the confirm token used for large files."""
+    file_id = _extract_gdrive_file_id(url)
+    if not file_id:
+        print(f"\n  ❌ Could not extract Google Drive file id for {desc}")
+        return False
+
+    base = "https://drive.google.com/uc?export=download"
+    initial_url = f"{base}&id={urllib.parse.quote(file_id)}"
+
+    cookie_jar = http.cookiejar.CookieJar()
+    opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cookie_jar))
+
+    def _stream_to_file(download_url: str) -> tuple[bool, str | None]:
+        req = urllib.request.Request(download_url, headers={"User-Agent": "Mozilla/5.0"})
+        with opener.open(req, timeout=60) as resp:
+            content_type = resp.headers.get("Content-Type", "")
+            # For the confirm-token page, Google returns text/html
+            if "text/html" in content_type.lower():
+                html = resp.read(2 * 1024 * 1024).decode("utf-8", errors="ignore")
+                # Virus scan warning pages provide a download form with hidden inputs.
+                # We'll parse the form and build the real download URL.
+
+                action_url: str | None = None
+                m = re.search(r"<form[^>]+action=\"([^\"]+)\"", html)
+                if m:
+                    action_url = m.group(1).replace("&amp;", "&")
+
+                fields: dict[str, str] = {}
+                for name, value in re.findall(r"name=\"([^\"]+)\"\s+value=\"([^\"]*)\"", html):
+                    fields[name] = value
+
+                # Cookie-based token (download_warning*) sometimes exists too.
+                if "confirm" not in fields:
+                    for c in cookie_jar:
+                        if c.name.startswith("download_warning"):
+                            fields["confirm"] = c.value
+                            break
+
+                # Fallback: confirm=<token> embedded in HTML
+                if "confirm" not in fields:
+                    m = re.search(r"confirm=([0-9A-Za-z_\-]+)", html)
+                    if m:
+                        fields["confirm"] = m.group(1)
+
+                if not fields.get("confirm"):
+                    return False, None
+
+                if not action_url:
+                    action_url = "https://drive.google.com/uc"
+                elif action_url.startswith("/"):
+                    action_url = "https://drive.google.com" + action_url
+                elif not action_url.startswith("http"):
+                    action_url = "https://drive.google.com/" + action_url.lstrip("/")
+
+                query = urllib.parse.urlencode(fields)
+                return False, action_url + ("&" if "?" in action_url else "?") + query
+
+            total_size = resp.headers.get("Content-Length")
+            total = int(total_size) if total_size and total_size.isdigit() else None
+
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            downloaded = 0
+            with open(dest, "wb") as f:
+                while True:
+                    chunk = resp.read(1024 * 256)
+                    if not chunk:
+                        break
+                    f.write(chunk)
+                    downloaded += len(chunk)
+                    if total:
+                        percent = min(100, int(downloaded * 100 / total))
+                        mb_downloaded = downloaded / (1024 * 1024)
+                        mb_total = total / (1024 * 1024)
+                        print(
+                            f"\r     Progress: {percent}% ({mb_downloaded:.1f}/{mb_total:.1f} MB)",
+                            end="",
+                            flush=True,
+                        )
+            print()
+            return True, None
+
+    print(f"  📥 Downloading {desc} (Google Drive)...")
+    print(f"     Source: {url}")
+    print(f"     Destination: {dest}")
+
+    ok, next_url = _stream_to_file(initial_url)
+    if ok:
+        return True
+
+    if not next_url:
+        print("\n  ❌ Google Drive download required confirmation but it could not be parsed (permission/quota?).")
+        return False
+
+    ok2, next_url2 = _stream_to_file(next_url)
+    if ok2:
+        return True
+
+    if next_url2:
+        # One more hop (rare), try once.
+        ok3, _ = _stream_to_file(next_url2)
+        return ok3
+    return False
+
+
 def download_file(url: str, dest: Path, desc: str = "") -> bool:
     """Download a file with progress indication."""
     if not url:
         print(f"  ⚠️  No URL configured for {desc}")
         return False
+
+    if "drive.google.com" in url:
+        return _download_google_drive(url, dest, desc)
 
     print(f"  📥 Downloading {desc}...")
     print(f"     URL: {url}")
@@ -181,7 +307,7 @@ def main() -> int:
         "--output-dir",
         type=Path,
         default=None,
-        help="Output directory for weights (default: <project>/src/CustomBoostTrack/weights)",
+        help="Output directory for weights (default: <project>/models)",
     )
     parser.add_argument(
         "--list",
@@ -192,11 +318,6 @@ def main() -> int:
         "--force",
         action="store_true",
         help="Force re-download even if file exists",
-    )
-    parser.add_argument(
-        "--all",
-        action="store_true",
-        help="Download all available models",
     )
 
     args = parser.parse_args()
@@ -209,7 +330,7 @@ def main() -> int:
     if args.output_dir:
         weights_dir = args.output_dir.resolve()
     else:
-        weights_dir = get_project_root() / "src" / "CustomBoostTrack" / "weights"
+        weights_dir = get_project_root() / "models"
 
     print("=" * 60)
     print("  MOT Model Weights Downloader")
@@ -217,7 +338,7 @@ def main() -> int:
     print(f"\n📁 Weights directory: {weights_dir}")
 
     # Determine which models to download
-    models_to_download = list(MODELS.keys()) if args.all else args.models
+    models_to_download = args.models
 
     print(f"📦 Models to download: {', '.join(models_to_download)}")
 

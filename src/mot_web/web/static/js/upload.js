@@ -352,10 +352,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 await displayResults(jobId);
             } else if (data.state === 'failed') {
                 throw new Error(data.message || 'Processing failed');
-            } else if (data.state === 'running' || data.state === 'created') {
+            } else if (data.state === 'queued' || data.state === 'running' || data.state === 'created') {
                 statusMessage.textContent = data.message || 'Processing...';
-                progressBar.style.width = '50%';
-                progressBar.setAttribute('aria-valuenow', 50);
+                // Keep progress moving while queued/running.
+                const current = parseInt(progressBar.getAttribute('aria-valuenow') || '30', 10);
+                const next = Math.min(95, Math.max(30, current + 5));
+                progressBar.style.width = `${next}%`;
+                progressBar.setAttribute('aria-valuenow', next);
                 await new Promise(resolve => setTimeout(resolve, 2000));
                 await pollStatus(jobId);
             } else if (data.state === 'not_found') {
@@ -401,7 +404,8 @@ document.addEventListener('DOMContentLoaded', () => {
             downloadAnnotationsButton.onclick = (e) => {
                 e.preventDefault();
                 const link = document.createElement('a');
-                link.href = `/video/results/${jobId}/annotations`;
+                // Ask the backend to set Content-Disposition so browsers don't pick a random filename.
+                link.href = `/video/results/${jobId}/annotations?download=1`;
                 link.download = `${jobId}_annotations.json`;
                 document.body.appendChild(link);
                 link.click();

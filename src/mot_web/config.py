@@ -6,7 +6,7 @@ import os
 
 @dataclass(frozen=True)
 class Settings:
-    # Flask
+    # Web
     secret_key: str
     environment: str  # "dev" | "prod"
     host: str
@@ -19,6 +19,13 @@ class Settings:
 
     # Runtime
     max_upload_mb: int
+
+    # Queue
+    queue_mode: str  # "inline" | "rq"
+    redis_url: str | None
+
+    # Triton (optional)
+    triton_url: str | None
 
 
 def load_settings() -> Settings:
@@ -36,4 +43,7 @@ def load_settings() -> Settings:
         upload_dir=upload_dir,
         results_dir=results_dir,
         max_upload_mb=int(os.getenv("MAX_UPLOAD_MB", "512")),
+        queue_mode=(os.getenv("QUEUE_MODE", "inline") or "inline").strip().lower(),
+        redis_url=os.getenv("REDIS_URL"),
+        triton_url=os.getenv("TRITON_URL"),
     )

@@ -13,6 +13,7 @@ import pytest
 
 from mot_web.app_factory import create_app
 from mot_web.web.routes.realtime import CV2_AVAILABLE
+from fastapi.testclient import TestClient
 
 
 @pytest.fixture
@@ -24,7 +25,6 @@ def app(tmp_path: Path):
     os.environ["ENV"] = "dev"
 
     app = create_app()
-    app.config["TESTING"] = True
     return app
 
 
@@ -33,10 +33,10 @@ class TestRealtimePage:
 
     def test_realtime_page_returns_html(self, app) -> None:
         """Realtime page should return HTML."""
-        client = app.test_client()
+        client = TestClient(app)
         resp = client.get("/realtime/")
         assert resp.status_code == 200
-        assert resp.content_type.startswith("text/html")
+        assert resp.headers["content-type"].startswith("text/html")
 
 
 class TestRealtimeTrackEndpoint:
@@ -44,28 +44,30 @@ class TestRealtimeTrackEndpoint:
 
     def test_track_without_frame_returns_error(self, app) -> None:
         """Request without frame should return 400 (or 503 if OpenCV not available)."""
-        client = app.test_client()
-        resp = client.post("/realtime/track", data={})
+        client = TestClient(app)
+        resp = client.post("/realtime/track", files={})
         # Without OpenCV: 503, With OpenCV: 400
         assert resp.status_code in (400, 503)
         if resp.status_code == 400:
-            assert "No frame provided" in resp.get_json()["error"]
+            assert "No frame provided" in resp.json()["error"]
         else:
-            assert "OpenCV not installed" in resp.get_json()["error"]
+            assert "OpenCV not installed" in resp.json()["error"]
 
     @pytest.mark.skipif(not CV2_AVAILABLE, reason="OpenCV not installed")
     def test_track_with_invalid_image_returns_400(self, app) -> None:
         """Request with invalid image data should return 400."""
-        client = app.test_client()
-        data = {"frame": (BytesIO(b"not an image"), "frame.jpg")}
-        resp = client.post("/realtime/track", data=data, content_type="multipart/form-data")
+        client = TestClient(app)
+        resp = client.post(
+            "/realtime/track",
+            files={"frame": ("frame.jpg", b"not an image", "image/jpeg")},
+        )
         assert resp.status_code == 400
-        assert "Failed to decode frame" in resp.get_json()["error"]
+        assert "Failed to decode frame" in resp.json()["error"]
 
     @pytest.mark.skipif(not CV2_AVAILABLE, reason="OpenCV not installed")
     def test_track_with_valid_frame_returns_annotated(self, app) -> None:
         """Request with valid frame should return annotated frame."""
-        client = app.test_client()
+        client = TestClient(app)
         
         # Create a minimal valid JPEG (1x1 pixel)
         # This is a minimal valid JPEG file
@@ -101,12 +103,14 @@ class TestRealtimeTrackEndpoint:
             0xC4, 0xB0, 0xA3, 0x1C, 0x07, 0xE7, 0x5E, 0x3F, 0xFF, 0xD9
         ])
         
-        data = {"frame": (BytesIO(jpeg_bytes), "frame.jpg")}
-        resp = client.post("/realtime/track", data=data, content_type="multipart/form-data")
+        resp = client.post(
+            "/realtime/track",
+            files={"frame": ("frame.jpg", jpeg_bytes, "image/jpeg")},
+        )
         
         # May fail if OpenCV can't decode minimal JPEG, that's ok
         if resp.status_code == 200:
-            result = resp.get_json()
+            result = resp.json()
             assert "annotated" in result
             assert "count" in result
             assert "timestamp" in result
@@ -116,7 +120,7 @@ class TestRealtimeTrackEndpoint:
         if not CV2_AVAILABLE:
             pytest.skip("OpenCV not installed")
             
-        client = app.test_client()
+        client = TestClient(app)
         # Create a simple valid image using OpenCV
         import cv2
         import numpy as np
@@ -124,40 +128,40 @@ class TestRealtimeTrackEndpoint:
         img = np.zeros((100, 100, 3), dtype=np.uint8)
         _, buffer = cv2.imencode('.jpg', img)
         
-        data = {
-            "frame": (BytesIO(buffer.tobytes()), "frame.jpg"),
-            "roi": "not valid json"
-        }
-        resp = client.post("/realtime/track", data=data, content_type="multipart/form-data")
+        resp = client.post(
+            "/realtime/track",
+            files={"frame": ("frame.jpg", buffer.tobytes(), "image/jpeg")},
+            data={"roi": "not valid json"},
+        )
         assert resp.status_code == 400
-        assert "Invalid ROI JSON" in resp.get_json()["error"]
+        assert "Invalid ROI JSON" in resp.json()["error"]
 
     def test_track_with_invalid_roi_format_returns_400(self, app) -> None:
         """Request with ROI missing required fields should return 400."""
         if not CV2_AVAILABLE:
             pytest.skip("OpenCV not installed")
             
-        client = app.test_client()
+        client = TestClient(app)
         import cv2
         import numpy as np
         
         img = np.zeros((100, 100, 3), dtype=np.uint8)
         _, buffer = cv2.imencode('.jpg', img)
         
-        data = {
-            "frame": (BytesIO(buffer.tobytes()), "frame.jpg"),
-            "roi": json.dumps({"x": 0.1})  # Missing y, width, height
-        }
-        resp = client.post("/realtime/track", data=data, content_type="multipart/form-data")
+        resp = client.post(
+            "/realtime/track",
+            files={"frame": ("frame.jpg", buffer.tobytes(), "image/jpeg")},
+            data={"roi": json.dumps({"x": 0.1})},
+        )
         assert resp.status_code == 400
-        assert "Invalid ROI format" in resp.get_json()["error"]
+        assert "Invalid ROI format" in resp.json()["error"]
 
     def test_track_with_valid_roi_succeeds(self, app) -> None:
         """Request with valid ROI should succeed."""
         if not CV2_AVAILABLE:
             pytest.skip("OpenCV not installed")
             
-        client = app.test_client()
+        client = TestClient(app)
         import cv2
         import numpy as np
         
@@ -165,40 +169,40 @@ class TestRealtimeTrackEndpoint:
         _, buffer = cv2.imencode('.jpg', img)
         
         roi = {"x": 0.1, "y": 0.1, "width": 0.5, "height": 0.5}
-        data = {
-            "frame": (BytesIO(buffer.tobytes()), "frame.jpg"),
-            "roi": json.dumps(roi)
-        }
-        resp = client.post("/realtime/track", data=data, content_type="multipart/form-data")
+        resp = client.post(
+            "/realtime/track",
+            files={"frame": ("frame.jpg", buffer.tobytes(), "image/jpeg")},
+            data={"roi": json.dumps(roi)},
+        )
         assert resp.status_code == 200
-        assert resp.get_json()["has_roi"] is True
+        assert resp.json()["has_roi"] is True
 
     def test_track_with_invalid_line_json_returns_400(self, app) -> None:
         """Request with invalid line JSON should return 400."""
         if not CV2_AVAILABLE:
             pytest.skip("OpenCV not installed")
             
-        client = app.test_client()
+        client = TestClient(app)
         import cv2
         import numpy as np
         
         img = np.zeros((100, 100, 3), dtype=np.uint8)
         _, buffer = cv2.imencode('.jpg', img)
         
-        data = {
-            "frame": (BytesIO(buffer.tobytes()), "frame.jpg"),
-            "line": "not valid json"
-        }
-        resp = client.post("/realtime/track", data=data, content_type="multipart/form-data")
+        resp = client.post(
+            "/realtime/track",
+            files={"frame": ("frame.jpg", buffer.tobytes(), "image/jpeg")},
+            data={"line": "not valid json"},
+        )
         assert resp.status_code == 400
-        assert "Invalid line JSON" in resp.get_json()["error"]
+        assert "Invalid line JSON" in resp.json()["error"]
 
     def test_track_with_valid_line_succeeds(self, app) -> None:
         """Request with valid line should succeed."""
         if not CV2_AVAILABLE:
             pytest.skip("OpenCV not installed")
             
-        client = app.test_client()
+        client = TestClient(app)
         import cv2
         import numpy as np
         
@@ -206,13 +210,13 @@ class TestRealtimeTrackEndpoint:
         _, buffer = cv2.imencode('.jpg', img)
         
         line = {"position": "left", "x": 0.5}
-        data = {
-            "frame": (BytesIO(buffer.tobytes()), "frame.jpg"),
-            "line": json.dumps(line)
-        }
-        resp = client.post("/realtime/track", data=data, content_type="multipart/form-data")
+        resp = client.post(
+            "/realtime/track",
+            files={"frame": ("frame.jpg", buffer.tobytes(), "image/jpeg")},
+            data={"line": json.dumps(line)},
+        )
         assert resp.status_code == 200
-        result = resp.get_json()
+        result = resp.json()
         assert "counts" in result
         assert "inside" in result["counts"]
         assert "outside" in result["counts"]
@@ -222,17 +226,19 @@ class TestRealtimeTrackEndpoint:
         if not CV2_AVAILABLE:
             pytest.skip("OpenCV not installed")
             
-        client = app.test_client()
+        client = TestClient(app)
         import cv2
         import numpy as np
         
         img = np.zeros((100, 100, 3), dtype=np.uint8)
         _, buffer = cv2.imencode('.jpg', img)
         
-        data = {"frame": (BytesIO(buffer.tobytes()), "frame.jpg")}
-        resp = client.post("/realtime/track", data=data, content_type="multipart/form-data")
+        resp = client.post(
+            "/realtime/track",
+            files={"frame": ("frame.jpg", buffer.tobytes(), "image/jpeg")},
+        )
         assert resp.status_code == 200
-        result = resp.get_json()
+        result = resp.json()
         assert "timestamp" in result
         assert isinstance(result["timestamp"], int)
         assert result["timestamp"] > 0

@@ -1,38 +1,51 @@
 from __future__ import annotations
 
-from flask import Flask
+from pathlib import Path
+
+from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
+from starlette.responses import Response
+from starlette.templating import Jinja2Templates
+
 from .config import load_settings
-from .web.routes.index import bp as index_bp
-from .web.routes.health import bp as health_bp
-from .web.routes.video import bp as video_bp
-from .web.routes.realtime import bp as realtime_bp
+
+from .web.routes.index import router as index_router
+from .web.routes.health import router as health_router
+from .web.routes.video import router as video_router
+from .web.routes.realtime import router as realtime_router
 
 
+class _NoCacheStaticFiles(StaticFiles):
+    async def get_response(self, path: str, scope) -> Response:  # type: ignore[override]
+        response = await super().get_response(path, scope)
+        # Dev UX: avoid stale JS/CSS from browser cache when iterating.
+        response.headers["Cache-Control"] = "no-store"
+        return response
 
-def create_app() -> Flask:
+def create_app() -> FastAPI:
     settings = load_settings()
 
-    app = Flask(
-        __name__,
-        template_folder="web/templates",
-        static_folder="web/static",
-    )
-
-    # Core config
-    app.config["SECRET_KEY"] = settings.secret_key
-    app.config["MAX_CONTENT_LENGTH"] = settings.max_upload_mb * 1024 * 1024
+    app = FastAPI(title="MOT Web")
 
     # Ensure runtime dirs exist
     settings.upload_dir.mkdir(parents=True, exist_ok=True)
     settings.results_dir.mkdir(parents=True, exist_ok=True)
 
-    # Store settings on app (simple pattern; you can later use flask.g or app.extensions)
-    app.config["SETTINGS"] = settings
+    # Store settings + templating on app.state
+    app.state.settings = settings
+    app.state.max_content_length = settings.max_upload_mb * 1024 * 1024
 
-    # Register blueprints
-    app.register_blueprint(health_bp)
-    app.register_blueprint(index_bp)
-    app.register_blueprint(video_bp)
-    app.register_blueprint(realtime_bp)
-    
+    package_root = Path(__file__).resolve().parent
+    templates_dir = package_root / "web" / "templates"
+    static_dir = package_root / "web" / "static"
+    app.state.templates = Jinja2Templates(directory=str(templates_dir))
+    static_cls = _NoCacheStaticFiles if settings.environment == "dev" else StaticFiles
+    app.mount("/static", static_cls(directory=str(static_dir)), name="static")
+
+    # Include routers (preserve existing URL contract)
+    app.include_router(health_router)
+    app.include_router(index_router)
+    app.include_router(video_router)
+    app.include_router(realtime_router)
+
     return app

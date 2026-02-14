@@ -1,111 +1,142 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
+from typing import Any
 
-from flask import Blueprint, current_app, jsonify, render_template, request, send_file
-from werkzeug.utils import secure_filename
+from fastapi import APIRouter, Body, Query, Request
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from fastapi import File, UploadFile
 
 from mot_web.services.tracking_service import TrackingService
 from mot_web.tracking.pipeline import run_video
+from mot_web.queue import enqueue_video_job, get_job_status
 
 
-bp = Blueprint("video", __name__, url_prefix="/video")
+router = APIRouter(prefix="/video")
 
 # Keep this tight; expand later if needed.
 ALLOWED_EXT = {".mp4", ".mov", ".avi", ".mkv"}
 
 
-def _get_service() -> TrackingService:
-    settings = current_app.config["SETTINGS"]
-    # cache per app instance
-    svc: TrackingService | None = current_app.extensions.get("tracking_service")
+_FILENAME_SAFE_RE = re.compile(r"[^A-Za-z0-9._-]+")
+
+
+def _secure_filename(name: str) -> str:
+    name = (name or "").strip().replace("\\", "/")
+    name = name.split("/")[-1]
+    name = _FILENAME_SAFE_RE.sub("_", name)
+    name = name.strip("._")
+    return name or "upload"
+
+
+def _get_service(request: Request) -> TrackingService:
+    settings = request.app.state.settings
+    svc: TrackingService | None = getattr(request.app.state, "tracking_service", None)
     if svc is None:
         svc = TrackingService(settings.upload_dir, settings.results_dir)
-        current_app.extensions["tracking_service"] = svc
+        request.app.state.tracking_service = svc
     return svc
 
 
-@bp.get("/")
-def video_page():
-    return render_template("video.html")
+@router.get("/", response_class=HTMLResponse)
+def video_page(request: Request):
+    return request.app.state.templates.TemplateResponse("video.html", {"request": request})
 
 
-@bp.post("/upload")
-def upload_video():
+@router.post("/upload")
+async def upload_video(request: Request, file: UploadFile | None = File(default=None)):
     """
     Multipart form-data:
       - file: uploaded video
     Returns: {job_id, filename}
     """
-    f = request.files.get("file")
-    if f is None or not f.filename:
-        return jsonify(error="missing file"), 400
+    if file is None or not file.filename:
+        return JSONResponse(status_code=400, content={"error": "missing file"})
 
-    filename = secure_filename(f.filename)
+    filename = _secure_filename(file.filename)
     ext = Path(filename).suffix.lower()
     if ext not in ALLOWED_EXT:
-        return jsonify(error=f"unsupported file type: {ext}", allowed=sorted(ALLOWED_EXT)), 400
+        return JSONResponse(
+            status_code=400,
+            content={"error": f"unsupported file type: {ext}", "allowed": sorted(ALLOWED_EXT)},
+        )
 
-    svc = _get_service()
+    svc = _get_service(request)
     job = svc.create_job(filename)
 
     # Save upload
-    f.save(job.upload_path)
+    job.upload_path.parent.mkdir(parents=True, exist_ok=True)
+    with job.upload_path.open("wb") as out:
+        while True:
+            chunk = await file.read(1024 * 1024)
+            if not chunk:
+                break
+            out.write(chunk)
 
-    return jsonify(job_id=job.job_id, filename=job.filename)
+    return {"job_id": job.job_id, "filename": job.filename}
 
 
-@bp.get("/status/<job_id>")
-def job_status(job_id: str):
-    svc = _get_service()
-    return jsonify(svc.get_status(job_id))
+@router.get("/status/{job_id}")
+def job_status(request: Request, job_id: str):
+    svc = _get_service(request)
+    settings = request.app.state.settings
+    if settings.queue_mode == "rq" and settings.redis_url:
+        redis_status = get_job_status(job_id)
+        if redis_status is not None:
+            # Merge Redis status over file-based status for consistency
+            base = svc.get_status(job_id)
+            return {**base, **redis_status}
+    return svc.get_status(job_id)
 
 
-@bp.post("/run/<job_id>")
-def run_job(job_id: str):
-    svc = _get_service()
+@router.post("/run/{job_id}")
+def run_job(request: Request, job_id: str, params: dict[str, Any] = Body(default_factory=dict)):
+    svc = _get_service(request)
     st = svc.get_status(job_id)
     if st.get("state") == "not_found":
-        return jsonify(error="job not found"), 404
+        return JSONResponse(status_code=404, content={"error": "job not found"})
 
-    settings = current_app.config["SETTINGS"]
+    settings = request.app.state.settings
     job_dir = settings.results_dir / job_id
 
-    # You can accept JSON params from frontend later.
-    params = request.get_json(silent=True) or {}
-
     try:
+        if settings.queue_mode == "rq" and settings.redis_url:
+            rq_job_id = enqueue_video_job(job_id, params=params)
+            svc.set_status(job_id, "queued", "queued")
+            return {"job_id": job_id, "state": "queued", "rq_job_id": rq_job_id}
+
         svc.set_status(job_id, "running", "processing started")
         run_video(input_path=settings.upload_dir / st["filename"], output_dir=job_dir, params=params)
         svc.set_status(job_id, "done", "processing complete")
-        return jsonify(job_id=job_id, state="done")
+        return {"job_id": job_id, "state": "done"}
     except Exception as e:
         svc.set_status(job_id, "failed", str(e))
-        return jsonify(job_id=job_id, state="failed", error=str(e)), 500
+        return JSONResponse(status_code=500, content={"job_id": job_id, "state": "failed", "error": str(e)})
 
 
-@bp.get("/results/<job_id>/annotations")
-def get_annotations(job_id: str):
+@router.get("/results/{job_id}/annotations")
+def get_annotations(request: Request, job_id: str, download: int | None = Query(default=None)):
     """Return the annotations.json file for a completed job."""
-    settings = current_app.config["SETTINGS"]
+    settings = request.app.state.settings
     annotations_path = settings.results_dir / job_id / "annotations.json"
     
     if not annotations_path.exists():
-        return jsonify(error="annotations not found"), 404
-    
-    return send_file(
-        annotations_path,
-        mimetype="application/json",
-        as_attachment=request.args.get("download") == "1",
-        download_name=f"{job_id}_annotations.json",
+        return JSONResponse(status_code=404, content={"error": "annotations not found"})
+
+    filename = f"{job_id}_annotations.json" if download == 1 else None
+    return FileResponse(
+        path=str(annotations_path),
+        media_type="application/json",
+        filename=filename,
     )
 
 
-@bp.get("/results/<job_id>/video")
-def get_result_video(job_id: str):
+@router.get("/results/{job_id}/video")
+def get_result_video(request: Request, job_id: str, download: int | None = Query(default=None)):
     """Return the processed video for a completed job."""
-    settings = current_app.config["SETTINGS"]
+    settings = request.app.state.settings
     job_dir = settings.results_dir / job_id
     
     # Look for output video (could be various names depending on pipeline)
@@ -120,7 +151,7 @@ def get_result_video(job_id: str):
     
     # Fallback: return the original uploaded video if no processed video exists
     if video_path is None:
-        svc = _get_service()
+        svc = _get_service(request)
         st = svc.get_status(job_id)
         if st.get("state") != "not_found" and st.get("filename"):
             original_path = settings.upload_dir / st["filename"]
@@ -128,30 +159,27 @@ def get_result_video(job_id: str):
                 video_path = original_path
     
     if video_path is None:
-        return jsonify(error="video not found"), 404
-    
-    return send_file(
-        video_path,
-        mimetype="video/mp4",
-        as_attachment=request.args.get("download") == "1",
-    )
+        return JSONResponse(status_code=404, content={"error": "video not found"})
+
+    filename = video_path.name if download == 1 else None
+    return FileResponse(path=str(video_path), media_type="video/mp4", filename=filename)
 
 
-@bp.get("/results/<job_id>/analytics")
-def get_analytics(job_id: str):
+@router.get("/results/{job_id}/analytics")
+def get_analytics(request: Request, job_id: str):
     """Return analytics data for a completed job."""
-    settings = current_app.config["SETTINGS"]
+    settings = request.app.state.settings
     job_dir = settings.results_dir / job_id
     
     # Check if analytics file exists
     analytics_path = job_dir / "analytics.json"
     if analytics_path.exists():
-        return send_file(analytics_path, mimetype="application/json")
+        return FileResponse(path=str(analytics_path), media_type="application/json")
     
     # Generate analytics from annotations if available
     annotations_path = job_dir / "annotations.json"
     if not annotations_path.exists():
-        return jsonify(error="analytics not available"), 404
+        return JSONResponse(status_code=404, content={"error": "analytics not available"})
     
     try:
         annotations = json.loads(annotations_path.read_text(encoding="utf-8"))
@@ -176,7 +204,7 @@ def get_analytics(job_id: str):
             "track_durations": track_durations,
             "video_info": annotations.get("video_info", {}),
         }
-        return jsonify(analytics)
+        return analytics
     except Exception as e:
-        return jsonify(error=f"failed to generate analytics: {str(e)}"), 500
+        return JSONResponse(status_code=500, content={"error": f"failed to generate analytics: {str(e)}"})
 

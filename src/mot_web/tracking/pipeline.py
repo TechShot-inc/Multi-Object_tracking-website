@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import random
 import sys
 import time
@@ -24,6 +25,21 @@ def run_video(input_path: Path, output_dir: Path, params: dict[str, Any]) -> Non
         params: Processing parameters (roi, speed, etc.)
     """
     output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Optional legacy/CustomBoostTrack integration (YOLO11+YOLO12 ensemble + OSNet ReID).
+    # Kept behind an env switch so contract tests (fake videos, missing deps) still pass.
+    pipeline_impl = (os.getenv("MOT_PIPELINE") or "yolo").strip().lower()
+    if pipeline_impl in {"stub", "noop"}:
+        _create_stub_output(input_path, output_dir, params, error=None)
+        return
+    if pipeline_impl in {"boosttrack", "customboosttrack", "ensemble"}:
+        try:
+            from mot_web.tracking.boosttrack_pipeline import run_video_boosttrack
+
+            run_video_boosttrack(input_path=input_path, output_dir=output_dir, params=params)
+            return
+        except Exception as e:
+            logger.exception("BoostTrack pipeline failed; falling back to YOLO/stub: %s", e)
     
     # Import YOLO
     try:
@@ -44,7 +60,15 @@ def run_video(input_path: Path, output_dir: Path, params: dict[str, Any]) -> Non
     logger.info(f"Using device: {device}" + (f" ({torch.cuda.get_device_name(0)})" if device == "cuda" else ""))
     
     # Initialize YOLO model with tracking
-    model_name = "yolov8n.pt"  # Use nano model for faster inference, change to yolov8x.pt for better accuracy
+    # Allow overriding the model path/name (useful in Docker where weights may be baked into the image)
+    model_name = os.getenv("YOLO_MODEL_PATH") or "yolov8n.pt"
+    if os.getenv("YOLO_MODEL_PATH"):
+        p = Path(model_name)
+        if not p.exists():
+            logger.warning(
+                "YOLO_MODEL_PATH is set but the file does not exist: %s (will let Ultralytics resolve/download if possible)",
+                model_name,
+            )
     logger.info(f"Loading YOLO model: {model_name}")
     
     try:

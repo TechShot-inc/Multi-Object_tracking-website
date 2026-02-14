@@ -1,135 +1,99 @@
-# Multi-Object Tracking Solution
+# Multi-Object Tracking Web App (FastAPI + Docker + BoostTrack + Triton)
 
-A web interface for multi-object tracking with two main, separated features:
-- Video upload and offline processing (video.html)
-- Real-time camera tracking (realtime.html)
+This repository is a production-oriented **FastAPI** web application for multi-object tracking, shipped with **Docker Compose**.
 
+It supports two user-facing flows:
 
----
+1) **Video upload (offline)**: upload a video, run the detection + tracking pipeline, then download results.
+2) **Realtime (webcam)**: your browser streams frames over WebSocket; the backend runs detection + tracking and returns an annotated preview.
 
-## Features
+Key components:
 
-- Video upload and server-side tracking pipeline
-  - Upload MP4/AVI/MOV/MKV
-  - Server processing (detection + tracking)
-  - Download annotated video and annotations
-- Real-time tracking using device camera
-  - Webcam access and ROI selection
-  - Server-side detection/tracking endpoint for realtime inference
-  - Live overlay of annotated frames on a canvas
-- Analytics & reporting
-  - Heatmaps, charts and PDF report export
-- Clean UI with Tailwind and modular JS/CSS assets
+- Web UI + API: FastAPI app (`mot-web`) serving templates + static assets and exposing HTTP + WebSocket routes.
+- Tracking pipeline: BoostTrack-based tracker + YOLO detectors.
+- Optional Triton inference: GPU-backed ensemble detector (YOLO11 + YOLO12) served via NVIDIA Triton Inference Server.
 
----
+If you’re new to the project, start here:
 
-## Repository layout (relevant files)
-
-- app/
-  - app.py — Flask application factory / routes
-  - realtime.py — Realtime tracking Flask endpoint(s)
-  - video.py — Video upload/processing endpoints
-  - realtimetracking.py — runtime for realtime
-  - templates/
-    - home.html — landing page selector (choose Video vs Realtime)
-    - video.html — video upload & offline processing UI
-    - realtime.html — realtime webcam tracking UI
-  - static/
-    - js/
-      - common.js
-      - upload.js
-      - realtime.js
-    - css/
-      - style.css
-      - premium.css
-- CustomBoostTrack/ 
-- run.py — start script
-- requirements.txt
+- Docs index: [docs/index.md](docs/index.md)
+- Development: [docs/development.md](docs/development.md)
+- Architecture / system design: [docs/architecture.md](docs/architecture.md)
+- API reference (HTTP + WebSocket): [docs/api.md](docs/api.md)
+- Configuration & tuning (confidence thresholds, performance knobs): [docs/configuration.md](docs/configuration.md)
+- FAQ: [docs/faq.md](docs/faq.md)
+- Triton model workflow: [docs/triton_from_pt.md](docs/triton_from_pt.md)
+- Troubleshooting: [docs/troubleshooting.md](docs/troubleshooting.md)
 
 ---
 
+## Quickstart (Docker)
 
+CPU-only (fast to get running):
 
-## Installation 
+1) Put weights under `models/` (or set env vars). Minimum:
+   - `models/yolo11x.pt`
+   - `models/yolo12x.pt`
+   - `models/osnet_ain_ms_m_c.pth.tar`
 
-1. Clone the repository:
-   ```
-   git clone https://github.com/TechShot-inc/Multi-Object_tracking-website.git
-   cd Multi-Object_tracking-website
-   ```
+2) Start the web + realtime stack:
 
-2. Create and activate environment (conda recommended):
-   ```
-   conda create -n AICV python=3.11 -y
-   conda activate AICV
-   ```
+`docker compose -f docker/compose.yml up -d --build`
 
-3. Install Python dependencies:
-   ```
-   pip install -r requirements.txt
-   ```
+3) Open:
 
-
-
-## Run the app
-
-From the repository root:
-
-```
-python run.py
-```
-
-Open your browser to:
-```
-http://localhost:5001
-```
-
-(If your Flask config uses a different port, follow the printed URL in the terminal.)
+`http://localhost:5000`
 
 ---
 
-## Usage
+## Triton + GPU (recommended for realtime)
 
-### Homepage
-- The homepage (home.html) acts as a selector. Choose either "Video Upload" or "Real-Time Tracking". Each option opens a dedicated page:
-  - `/video` -> video.html (video upload & processing)
-  - `/realtime` -> realtime.html (camera tracking)
+You’ll get the best realtime latency when the detector backend is Triton.
 
-### Video Upload (video.html)
-1. Upload a supported video file.
-2. Optionally select ROI on the preview.
-3. Configure frame extraction / output speed sliders.
-4. Click "Upload and Process".
-5. After processing, view annotated video, download annotations or PDF report.
+1) Ensure NVIDIA Container Toolkit works:
 
-### Real-Time Tracking (realtime.html)
-1. Allow webcam access when prompted by browser.
-2. Optionally select ROI before starting.
-3. Click "Start Tracking" to begin real-time processing (frames are sent to `/realtime-track`).
-4. Click "Stop Tracking" to end the session and release the camera.
+`docker run --rm --gpus all nvidia/cuda:12.4.1-runtime-ubuntu22.04 nvidia-smi`
+
+2) Start Triton profile:
+
+`DETECTOR_BACKEND=triton docker compose -f docker/compose.yml -f docker/compose.gpu.yml --profile triton up -d --build`
+
+3) Verify:
+
+- Web UI: `http://localhost:5000`
+- Triton ready: `http://localhost:8000/v2/health/ready`
 
 ---
 
-## Frontend notes
+## Realtime confidence tuning (common request)
 
-- The UI uses separate templates:
-  - `video.html` contains the whole video upload and report flow.
-  - `realtime.html` contains webcam, ROI canvas, overlay canvas, and start/stop controls.
-- Real-time overlay is drawn to a canvas (`tracking-canvas`) sized to match the video element. If annotated frames flicker or appear delayed, check:
-  - webcam permissions
-  - canvas sizing code (resizeRoiCanvasRealtime)
-  - that `/realtime-track` returns `annotated` base64 JPEG for each frame
-- JS files:
-  - `static/js/realtime.js` — core realtime logic (start/stop, frame capture, ROI)
-  - `static/js/upload.js` — video upload handling
-  - `static/js/common.js` — shared helpers (modal, image utilities)
-  
+To reduce false boxes, raise the *final fused-box threshold*:
+
+- `REALTIME_ENSEMBLE_CONF` (default is set in [docker/compose.yml](docker/compose.yml))
+
+Example:
+
+`export REALTIME_ENSEMBLE_CONF=0.7`
+
+Then recreate `mot-realtime` or restart the stack.
+
+More knobs and how they interact: [docs/configuration.md](docs/configuration.md)
+
 ---
 
+## Project entrypoints
 
-## Contributors
+- Web app (dev/prod): [src/mot_web/__main__.py](src/mot_web/__main__.py)
+- App factory / router wiring: [src/mot_web/app_factory.py](src/mot_web/app_factory.py)
+- Web routes:
+  - [src/mot_web/web/routes/video.py](src/mot_web/web/routes/video.py)
+  - [src/mot_web/web/routes/realtime.py](src/mot_web/web/routes/realtime.py)
+  - [src/mot_web/web/routes/health.py](src/mot_web/web/routes/health.py)
+- Dedicated realtime backend (for WebSocket proxy): [src/mot_web/realtime_backend_app.py](src/mot_web/realtime_backend_app.py)
+- BoostTrack + ensemble logic: [CustomBoostTrack](CustomBoostTrack)
 
-- Domadios Morcos — https://github.com/DomaMorcos  
-- Ahmed Walaaeldin — https://github.com/Ahmed-Walaaeldin  
-- Omar Hekal — https://github.com/omar-hekal
+---
+
+## License
+
+See [CustomBoostTrack/LICENSE](CustomBoostTrack/LICENSE) for the tracking submodule’s license.
 

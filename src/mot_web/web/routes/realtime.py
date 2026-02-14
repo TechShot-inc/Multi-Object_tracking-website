@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import base64
+import asyncio
 import json
+import os
+import threading
 import time
-from typing import TYPE_CHECKING
 
-from flask import Blueprint, jsonify, render_template, request
+from fastapi import APIRouter, Form, Request, WebSocket, WebSocketDisconnect
+from fastapi import File, UploadFile
+from fastapi.responses import HTMLResponse, JSONResponse
 
 # OpenCV/numpy are optional - graceful degradation for testing
 try:
@@ -15,92 +19,213 @@ try:
 except ImportError:
     CV2_AVAILABLE = False
 
-bp = Blueprint("realtime", __name__, url_prefix="/realtime")
+router = APIRouter(prefix="/realtime")
 
 
-@bp.get("/")
-def realtime_page():
-    return render_template("realtime.html")
+_REALTIME_BACKEND_WS = os.getenv("REALTIME_BACKEND_WS")
 
 
-@bp.post("/track")
-def realtime_track():
-    """
-    Process a webcam frame for real-time tracking.
-    
-    Expects multipart form data:
-      - frame: JPEG image blob
-      - roi (optional): JSON string with {x, y, width, height} normalized 0-1
-      - line (optional): JSON string with {position: 'left'|'right', x: 0-1}
-    
-    Returns:
-      - annotated: base64 JPEG of annotated frame
-      - count: number of detected objects
-      - timestamp: server timestamp in ms
-      - counts: {inside: N, outside: M} if line is provided
-    """
+_tracker_lock = threading.Lock()
+_tracker = None
+_tracker_error: str | None = None
+_frame_counter = 0
+
+_counts_inside = 0
+_counts_outside = 0
+_track_last_side: dict[int, str] = {}
+
+
+def _default_model_paths() -> dict[str, str]:
+    project_root = os.getenv("PROJECT_ROOT", os.getcwd())
+    models_dir = os.getenv("MODELS_DIR", os.path.join(project_root, "models"))
+    return {
+        "yolo1": os.getenv("YOLO11_MODEL_PATH", os.path.join(models_dir, "yolo11x.pt")),
+        "yolo2": os.getenv("YOLO12_MODEL_PATH", os.path.join(models_dir, "yolo12x.pt")),
+        "reid": os.getenv("REID_MODEL_PATH", os.path.join(models_dir, "osnet_ain_ms_m_c.pth.tar")),
+    }
+
+
+def _get_tracker():
+    global _tracker, _tracker_error
+    if _tracker is not None:
+        return _tracker
+
+    with _tracker_lock:
+        if _tracker is not None:
+            return _tracker
+        try:
+            from CustomBoostTrack.realtime_ensembling import RealTimeTracker
+
+            model_paths = _default_model_paths()
+            if not (os.path.exists(model_paths["yolo1"]) and os.path.exists(model_paths["yolo2"])):
+                raise FileNotFoundError(
+                    "YOLO weights not found. Set YOLO11_MODEL_PATH/YOLO12_MODEL_PATH or place them under MODELS_DIR."
+                )
+            if not os.path.exists(model_paths["reid"]):
+                raise FileNotFoundError(
+                    "ReID weights not found. Set REID_MODEL_PATH or place it under MODELS_DIR."
+                )
+
+            _tracker = RealTimeTracker(
+                model1_path=model_paths["yolo1"],
+                model2_path=model_paths["yolo2"],
+                reid_path=model_paths["reid"],
+                frame_rate=30,
+            )
+        except Exception as e:
+            _tracker_error = str(e)
+            _tracker = None
+        return _tracker
+
+
+def _tracker_status() -> dict:
+    tracker = _get_tracker()
+    if tracker is not None:
+        return {"tracker_active": True}
+    # Surface a short, user-visible reason in dev; helps debug missing weights/deps.
+    err = (_tracker_error or "tracker unavailable").strip()
+    if len(err) > 240:
+        err = err[:240] + "…"
+    return {"tracker_active": False, "tracker_error": err}
+
+
+def _update_line_counts(detections: list[dict], line: dict, width: int) -> dict[str, int]:
+    global _counts_inside, _counts_outside
+
+    line_x = int(float(line.get("x", 0.5)) * width)
+    inside_side = "left" if line.get("position") == "left" else "right"
+
+    for det in detections:
+        try:
+            track_id = int(det["id"])
+            x = float(det["x"])
+            w = float(det["width"])
+        except Exception:
+            continue
+
+        cx = x + (w / 2.0)
+        side = "left" if cx < line_x else "right"
+        prev = _track_last_side.get(track_id)
+        if prev is None:
+            _track_last_side[track_id] = side
+            continue
+        if prev != side:
+            if side == inside_side:
+                _counts_inside += 1
+            else:
+                _counts_outside += 1
+            _track_last_side[track_id] = side
+
+    return {"inside": int(_counts_inside), "outside": int(_counts_outside)}
+
+
+@router.get("/", response_class=HTMLResponse)
+def realtime_page_fastapi(request: Request):
+    return request.app.state.templates.TemplateResponse("realtime.html", {"request": request})
+
+
+@router.post("/track")
+async def realtime_track_fastapi(
+    request: Request,
+    frame: UploadFile | None = File(default=None),
+    roi: str | None = Form(default=None),
+    line: str | None = Form(default=None),
+):
     if not CV2_AVAILABLE:
-        return jsonify(error="OpenCV not installed - realtime tracking unavailable"), 503
+        return JSONResponse(status_code=503, content={"error": "OpenCV not installed - realtime tracking unavailable"})
 
-    if "frame" not in request.files:
-        return jsonify(error="No frame provided"), 400
-
-    frame_file = request.files["frame"]
-    frame_data = frame_file.read()
-
-    # Decode frame
-    nparr = np.frombuffer(frame_data, np.uint8)
-    frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
     if frame is None:
-        return jsonify(error="Failed to decode frame"), 400
+        return JSONResponse(status_code=400, content={"error": "No frame provided"})
+
+    frame_data = await frame.read()
+
+    nparr = np.frombuffer(frame_data, np.uint8)
+    decoded = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+    if decoded is None:
+        return JSONResponse(status_code=400, content={"error": "Failed to decode frame"})
 
     # Parse optional ROI
-    roi = None
-    if "roi" in request.form:
+    roi_obj = None
+    if roi is not None:
         try:
-            roi = json.loads(request.form["roi"])
-            if not isinstance(roi, dict) or not all(k in roi for k in ["x", "y", "width", "height"]):
-                return jsonify(error="Invalid ROI format"), 400
+            roi_obj = json.loads(roi)
+            if not isinstance(roi_obj, dict) or not all(k in roi_obj for k in ["x", "y", "width", "height"]):
+                return JSONResponse(status_code=400, content={"error": "Invalid ROI format"})
         except json.JSONDecodeError as e:
-            return jsonify(error=f"Invalid ROI JSON: {e}"), 400
+            return JSONResponse(status_code=400, content={"error": f"Invalid ROI JSON: {e}"})
 
     # Parse optional line
-    line = None
-    if "line" in request.form:
+    line_obj = None
+    if line is not None:
         try:
-            line = json.loads(request.form["line"])
-            if not isinstance(line, dict) or "position" not in line or "x" not in line:
-                return jsonify(error="Invalid line format"), 400
+            line_obj = json.loads(line)
+            if not isinstance(line_obj, dict) or "position" not in line_obj or "x" not in line_obj:
+                return JSONResponse(status_code=400, content={"error": "Invalid line format"})
         except json.JSONDecodeError as e:
-            return jsonify(error=f"Invalid line JSON: {e}"), 400
+            return JSONResponse(status_code=400, content={"error": f"Invalid line JSON: {e}"})
 
-    # === STUB IMPLEMENTATION ===
-    # TODO: Replace with actual tracking pipeline (CustomBoostTrack integration)
-    # For now, just return the frame with a simple overlay to prove the endpoint works
-    
-    annotated_frame = frame.copy()
+    annotated_frame = decoded.copy()
     h, w = annotated_frame.shape[:2]
-    
+
+    tracker = _get_tracker()
+    detections: list[dict] = []
+    model_paths = None
+    if tracker is not None:
+        global _frame_counter
+        _frame_counter += 1
+        try:
+            detections = tracker.update(frame=decoded, frame_id=_frame_counter, roi=roi_obj)
+            model_paths = _default_model_paths()
+        except Exception:
+            detections = []
+
     # Draw ROI if provided
-    if roi:
-        x1 = int(roi["x"] * w)
-        y1 = int(roi["y"] * h)
-        x2 = int((roi["x"] + roi["width"]) * w)
-        y2 = int((roi["y"] + roi["height"]) * h)
+    if roi_obj:
+        x1 = int(roi_obj["x"] * w)
+        y1 = int(roi_obj["y"] * h)
+        x2 = int((roi_obj["x"] + roi_obj["width"]) * w)
+        y2 = int((roi_obj["y"] + roi_obj["height"]) * h)
         cv2.rectangle(annotated_frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
         cv2.putText(annotated_frame, "ROI", (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
 
     # Draw counting line if provided
-    if line:
-        line_x = int(line["x"] * w)
+    if line_obj:
+        line_x = int(float(line_obj["x"]) * w)
         cv2.line(annotated_frame, (line_x, 0), (line_x, h), (255, 0, 0), 2)
-        side = "L" if line["position"] == "left" else "R"
-        cv2.putText(annotated_frame, f"Count Line ({side})", (line_x + 5, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 0, 0), 2)
+        side = "L" if line_obj["position"] == "left" else "R"
+        cv2.putText(
+            annotated_frame,
+            f"Count Line ({side})",
+            (line_x + 5, 30),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.6,
+            (255, 0, 0),
+            2,
+        )
 
-    # Add status overlay
+    for det in detections:
+        try:
+            x1 = int(float(det["x"]))
+            y1 = int(float(det["y"]))
+            x2 = x1 + int(float(det["width"]))
+            y2 = y1 + int(float(det["height"]))
+            tid = int(det["id"])
+        except Exception:
+            continue
+        cv2.rectangle(annotated_frame, (x1, y1), (x2, y2), (0, 255, 255), 2)
+        cv2.putText(
+            annotated_frame,
+            f"ID {tid}",
+            (x1, max(0, y1 - 10)),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.6,
+            (0, 255, 255),
+            2,
+        )
+
     cv2.putText(
         annotated_frame,
-        "Tracking Active (stub)",
+        "Tracking Active" if tracker is not None else "Tracking Active (stub)",
         (10, h - 20),
         cv2.FONT_HERSHEY_SIMPLEX,
         0.7,
@@ -108,14 +233,184 @@ def realtime_track():
         2,
     )
 
-    # Encode annotated frame
     _, buffer = cv2.imencode(".jpg", annotated_frame)
     encoded_frame = base64.b64encode(buffer).decode("utf-8")
 
-    return jsonify(
-        annotated=encoded_frame,
-        count=0,  # Stub: no detections
-        timestamp=int(time.time() * 1000),
-        has_roi=roi is not None,
-        counts={"inside": 0, "outside": 0},
-    )
+    counts = {"inside": 0, "outside": 0}
+    if line_obj:
+        counts = _update_line_counts(detections, line=line_obj, width=w)
+
+    resp = {
+        "annotated": encoded_frame,
+        "count": len(detections),
+        "timestamp": int(time.time() * 1000),
+        "has_roi": roi_obj is not None,
+        "counts": counts,
+    }
+    resp.update(_tracker_status())
+    if model_paths is not None:
+        resp["model_paths"] = model_paths
+    return resp
+
+
+@router.websocket("/ws")
+async def realtime_ws(ws: WebSocket):
+    await ws.accept()
+
+    # Production path: proxy this WebSocket to the dedicated realtime backend.
+    # This keeps the web container CPU-only (no Torch/Ultralytics).
+    if _REALTIME_BACKEND_WS:
+        try:
+            import websockets  # provided by uvicorn[standard]
+
+            async with websockets.connect(_REALTIME_BACKEND_WS, max_size=50_000_000) as backend:
+
+                async def client_to_backend():
+                    while True:
+                        msg = await ws.receive()
+                        if msg.get("type") == "websocket.disconnect":
+                            break
+                        if msg.get("text") is not None:
+                            await backend.send(msg["text"])
+                        elif msg.get("bytes") is not None:
+                            await backend.send(msg["bytes"])
+
+                async def backend_to_client():
+                    async for msg in backend:
+                        if isinstance(msg, (bytes, bytearray)):
+                            await ws.send_bytes(bytes(msg))
+                        else:
+                            await ws.send_text(str(msg))
+
+                t1 = asyncio.create_task(client_to_backend())
+                t2 = asyncio.create_task(backend_to_client())
+                _, pending = await asyncio.wait({t1, t2}, return_when=asyncio.FIRST_COMPLETED)
+                for task in pending:
+                    task.cancel()
+        except Exception as e:
+            await ws.send_json({"type": "error", "error": f"realtime backend proxy failed: {e}"})
+        finally:
+            try:
+                await ws.close()
+            except Exception:
+                pass
+        return
+
+    if not CV2_AVAILABLE:
+        await ws.send_json({"error": "OpenCV not installed - realtime tracking unavailable"})
+        await ws.close(code=1011)
+        return
+
+    roi_obj: dict | None = None
+    line_obj: dict | None = None
+
+    try:
+        while True:
+            message = await ws.receive()
+
+            if message.get("type") == "websocket.disconnect":
+                break
+
+            if message.get("text") is not None:
+                # Config message: {type:"config", roi:<dict|null>, line:<dict|null>}
+                try:
+                    payload = json.loads(message["text"])
+                except Exception:
+                    await ws.send_json({"error": "invalid json"})
+                    continue
+                if isinstance(payload, dict) and payload.get("type") == "config":
+                    roi_obj = payload.get("roi")
+                    line_obj = payload.get("line")
+                    await ws.send_json({"type": "ack"})
+                continue
+
+            frame_bytes = message.get("bytes")
+            if frame_bytes is None:
+                continue
+
+            nparr = np.frombuffer(frame_bytes, np.uint8)
+            decoded = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+            if decoded is None:
+                await ws.send_json({"error": "Failed to decode frame"})
+                continue
+
+            # Reuse the HTTP handler's logic by calling into the same code path.
+            # This is intentionally duplicated lightly to avoid heavy refactors.
+            annotated_frame = decoded.copy()
+            h, w = annotated_frame.shape[:2]
+
+            tracker = _get_tracker()
+            detections: list[dict] = []
+            model_paths = None
+            if tracker is not None:
+                global _frame_counter
+                _frame_counter += 1
+                try:
+                    detections = tracker.update(frame=decoded, frame_id=_frame_counter, roi=roi_obj)
+                    model_paths = _default_model_paths()
+                except Exception:
+                    detections = []
+
+            if roi_obj and isinstance(roi_obj, dict):
+                try:
+                    x1 = int(float(roi_obj["x"]) * w)
+                    y1 = int(float(roi_obj["y"]) * h)
+                    x2 = int((float(roi_obj["x"]) + float(roi_obj["width"])) * w)
+                    y2 = int((float(roi_obj["y"]) + float(roi_obj["height"])) * h)
+                    cv2.rectangle(annotated_frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                    cv2.putText(annotated_frame, "ROI", (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+                except Exception:
+                    pass
+
+            if line_obj and isinstance(line_obj, dict) and "x" in line_obj and "position" in line_obj:
+                try:
+                    line_x = int(float(line_obj["x"]) * w)
+                    cv2.line(annotated_frame, (line_x, 0), (line_x, h), (255, 0, 0), 2)
+                    side = "L" if line_obj["position"] == "left" else "R"
+                    cv2.putText(annotated_frame, f"Count Line ({side})", (line_x + 5, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 0, 0), 2)
+                except Exception:
+                    pass
+
+            for det in detections:
+                try:
+                    x1 = int(float(det["x"]))
+                    y1 = int(float(det["y"]))
+                    x2 = x1 + int(float(det["width"]))
+                    y2 = y1 + int(float(det["height"]))
+                    tid = int(det["id"])
+                except Exception:
+                    continue
+                cv2.rectangle(annotated_frame, (x1, y1), (x2, y2), (0, 255, 255), 2)
+                cv2.putText(annotated_frame, f"ID {tid}", (x1, max(0, y1 - 10)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+
+            cv2.putText(
+                annotated_frame,
+                "Tracking Active" if tracker is not None else "Tracking Active (stub)",
+                (10, h - 20),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.7,
+                (0, 255, 255),
+                2,
+            )
+
+            _, buffer = cv2.imencode(".jpg", annotated_frame)
+            encoded_frame = base64.b64encode(buffer).decode("utf-8")
+
+            counts = {"inside": 0, "outside": 0}
+            if line_obj and isinstance(line_obj, dict):
+                counts = _update_line_counts(detections, line=line_obj, width=w)
+
+            resp = {
+                "annotated": encoded_frame,
+                "count": len(detections),
+                "timestamp": int(time.time() * 1000),
+                "has_roi": roi_obj is not None,
+                "counts": counts,
+            }
+            resp.update(_tracker_status())
+            if model_paths is not None:
+                resp["model_paths"] = model_paths
+
+            await ws.send_json(resp)
+    except WebSocketDisconnect:
+        return

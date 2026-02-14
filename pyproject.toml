@@ -8,17 +8,34 @@ version = "0.1.0"
 description = "Multi-object tracking web application"
 requires-python = ">=3.10"
 dependencies = [
-  "flask>=3.0",
+  "fastapi>=0.111",
+  "uvicorn[standard]>=0.27",
+  "python-multipart>=0.0.9",
+  "jinja2>=3.1",
   "numpy>=1.24",
   "opencv-python>=4.8",
-  "ultralytics>=8.0",
-  "torch>=2.0",
-  "torchvision>=0.15",
+  "redis>=5.0",
+  "rq>=1.16",
 ]
 
 [project.optional-dependencies]
+ml = [
+  "ultralytics>=8.0",
+  "torch>=2.0",
+  "torchvision>=0.15",
+  "torchreid>=0.2.5",
+  "gdown>=5.1.0",
+  "tensorboard>=2.14",
+  "lap>=0.4.0",
+  "pandas>=2.0",
+  "scipy>=1.10",
+  "onnx>=1.15",
+  "tritonclient[grpc]>=2.41",
+]
 dev = [
   "pytest>=8",
+  "pytest-timeout>=2.3",
+  "httpx>=0.25",
 ]
 
 [project.scripts]

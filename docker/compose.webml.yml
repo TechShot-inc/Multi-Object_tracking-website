@@ -1,0 +1,24 @@
+# Optional override: run the web app with ML dependencies included.
+# This enables REAL realtime BoostTrack+YOLO (instead of the lightweight stub mode).
+#
+# Usage:
+#   docker compose -f docker/compose.yml -f docker/compose.webml.yml up --build
+#   (add -f docker/compose.gpu.yml if you also want GPU-enabled Triton/worker)
+
+services:
+  mot-web-dev:
+    build:
+      target: worker
+    command: ["mot-web"]
+    environment:
+      - PROJECT_ROOT=/app
+      - MODELS_DIR=/app/models
+      - YOLO11_MODEL_PATH=/app/models/yolo11x.pt
+      - YOLO12_MODEL_PATH=/app/models/yolo12x.pt
+      - REID_MODEL_PATH=/app/models/osnet_ain_ms_m_c.pth.tar
+    volumes:
+      # Keep hot-reload for the app code
+      - ../src:/app/src:ro
+      # Mount tracking code + weights for realtime mode
+      - ../CustomBoostTrack:/app/CustomBoostTrack:ro
+      - ../models:/app/models:ro

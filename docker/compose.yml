@@ -4,11 +4,22 @@
 #   Production:  docker compose -f docker/compose.yml --profile prod up
 
 services:
+  redis:
+    image: redis:7-alpine
+    container_name: mot-redis
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+
   # Development service with hot-reload
   mot-web-dev:
     build:
       context: ..
       dockerfile: docker/Dockerfile
+      target: web
+      args:
+        BASE_IMAGE: ${BASE_IMAGE:-python:3.11-slim}
+        DOWNLOAD_MODELS: "0"
     container_name: mot-web-dev
     ports:
       - "5000:5000"
@@ -18,6 +29,14 @@ services:
       - PORT=5000
       - SECRET_KEY=dev-only-change-me
       - MAX_UPLOAD_MB=512
+      - QUEUE_MODE=rq
+      - REDIS_URL=redis://redis:6379/0
+      - TRITON_URL=triton:8001
+      - DETECTOR_BACKEND=${DETECTOR_BACKEND:-local}
+      - TRITON_YOLO11_MODEL=${TRITON_YOLO11_MODEL:-yolo11}
+      - TRITON_YOLO12_MODEL=${TRITON_YOLO12_MODEL:-yolo12}
+      # Proxy realtime inference to the GPU-backed realtime service (keeps web CPU-only)
+      - REALTIME_BACKEND_WS=ws://mot-realtime:5001/realtime/ws
     volumes:
       # Mount source for hot-reload during development
       - ../src:/app/src:ro
@@ -37,6 +56,10 @@ services:
     build:
       context: ..
       dockerfile: docker/Dockerfile
+      target: web
+      args:
+        BASE_IMAGE: ${BASE_IMAGE:-python:3.11-slim}
+        DOWNLOAD_MODELS: "0"
     container_name: mot-web-prod
     profiles:
       - prod
@@ -46,8 +69,14 @@ services:
       - ENV=prod
       - HOST=0.0.0.0
       - PORT=5000
-      - SECRET_KEY=${SECRET_KEY:?SECRET_KEY is required for production}
+      - SECRET_KEY
       - MAX_UPLOAD_MB=512
+      - QUEUE_MODE=rq
+      - REDIS_URL=redis://redis:6379/0
+      - TRITON_URL=triton:8001
+      - DETECTOR_BACKEND=${DETECTOR_BACKEND:-local}
+      - TRITON_YOLO11_MODEL=${TRITON_YOLO11_MODEL:-yolo11}
+      - TRITON_YOLO12_MODEL=${TRITON_YOLO12_MODEL:-yolo12}
     volumes:
       - mot-uploads:/app/var/uploads
       - mot-results:/app/var/results
@@ -65,8 +94,242 @@ services:
       retries: 3
       start_period: 10s
 
+  mot-worker:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      target: worker
+      args:
+        BASE_IMAGE: ${BASE_IMAGE:-python:3.11-slim}
+        DOWNLOAD_MODELS: ${DOWNLOAD_MODELS:-0}
+    container_name: mot-worker
+    command: ["python", "-m", "mot_web.worker"]
+    environment:
+      - ENV=${ENV:-dev}
+      - PROJECT_ROOT=/app
+      - UPLOAD_DIR=/app/var/uploads
+      - RESULTS_DIR=/app/var/results
+      - QUEUE_MODE=rq
+      - REDIS_URL=redis://redis:6379/0
+      - TRITON_URL=triton:8001
+      - DETECTOR_BACKEND=${DETECTOR_BACKEND:-local}
+      - TRITON_YOLO11_MODEL=${TRITON_YOLO11_MODEL:-yolo11}
+      - TRITON_YOLO12_MODEL=${TRITON_YOLO12_MODEL:-yolo12}
+      - HOST=0.0.0.0
+      - PORT=5000
+      - MODELS_DIR=/app/models
+      - YOLO11_MODEL_PATH=/app/models/yolo11x.pt
+      - YOLO12_MODEL_PATH=/app/models/yolo12x.pt
+      - REID_MODEL_PATH=/app/models/osnet_ain_ms_m_c.pth.tar
+      - MOT_PIPELINE=boosttrack
+      - YOLO_MODEL_PATH=/app/models/yolov8n.pt
+      - YOLO_CONFIG_DIR=/tmp/Ultralytics
+    volumes:
+      - mot-uploads:/app/var/uploads
+      - mot-results:/app/var/results
+    depends_on:
+      - redis
+    restart: unless-stopped
+    healthcheck:
+      disable: true
+
+  # GPU-backed realtime inference service (YOLO11+YOLO12 ensemble + BoostTrack)
+  # Web proxies browser WebSocket traffic to this service.
+  mot-realtime:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      target: worker
+      args:
+        BASE_IMAGE: ${BASE_IMAGE:-python:3.11-slim}
+        DOWNLOAD_MODELS: ${DOWNLOAD_MODELS:-0}
+    container_name: mot-realtime
+    command: ["python", "-m", "uvicorn", "mot_web.realtime_backend_app:app", "--host", "0.0.0.0", "--port", "5001"]
+    environment:
+      - ENV=${ENV:-dev}
+      - HOST=0.0.0.0
+      - PORT=5001
+      - PROJECT_ROOT=/app
+      - REALTIME_PROFILE=${REALTIME_PROFILE:-legacy}
+      # Realtime tuning knobs (pass-through so you can `export ...` before `docker compose up`)
+      - REALTIME_YOLO_CONF=${REALTIME_YOLO_CONF:-}
+      - REALTIME_ENSEMBLE_CONF=${REALTIME_ENSEMBLE_CONF:-0.7}
+      - REALTIME_ENSEMBLE_IOU=${REALTIME_ENSEMBLE_IOU:-}
+      - REALTIME_DET_THRESH=${REALTIME_DET_THRESH:-}
+      - REALTIME_MIN_BOX_AREA=${REALTIME_MIN_BOX_AREA:-}
+      - REALTIME_MIN_BOX_H=${REALTIME_MIN_BOX_H:-}
+      - REALTIME_MIN_BOX_W=${REALTIME_MIN_BOX_W:-}
+      - REALTIME_MIN_TRACK_CONF=${REALTIME_MIN_TRACK_CONF:-}
+      - REALTIME_ASPECT_RATIO_THRESH=${REALTIME_ASPECT_RATIO_THRESH:-}
+      - REALTIME_DEBUG=${REALTIME_DEBUG:-}
+      - REALTIME_TIMING=${REALTIME_TIMING:-}
+      - REALTIME_PREVIEW_MAX_W=${REALTIME_PREVIEW_MAX_W:-}
+      - REALTIME_PREVIEW_JPEG_QUALITY=${REALTIME_PREVIEW_JPEG_QUALITY:-}
+      - REALTIME_TRITON_PARALLEL=${REALTIME_TRITON_PARALLEL:-}
+      - REALTIME_TRITON_SHARED_PREPROCESS=${REALTIME_TRITON_SHARED_PREPROCESS:-}
+      - REALTIME_WBF_TOPK=${REALTIME_WBF_TOPK:-}
+      - REALTIME_WBF_SKIP_BOX_THR=${REALTIME_WBF_SKIP_BOX_THR:-}
+      - TRITON_NMS_IOU=${TRITON_NMS_IOU:-}
+      - TRITON_PRE_TOPK=${TRITON_PRE_TOPK:-}
+      - TRITON_MAX_DET=${TRITON_MAX_DET:-}
+      - TRITON_INPUT_SIZE=${TRITON_INPUT_SIZE:-}
+      - MODELS_DIR=/app/models
+      - YOLO11_MODEL_PATH=/app/models/yolo11x.pt
+      - YOLO12_MODEL_PATH=/app/models/yolo12x.pt
+      - REID_MODEL_PATH=/app/models/osnet_ain_ms_m_c.pth.tar
+      - DETECTOR_BACKEND=${DETECTOR_BACKEND:-local}
+      - TRITON_URL=triton:8001
+      - TRITON_YOLO11_MODEL=${TRITON_YOLO11_MODEL:-yolo11}
+      - TRITON_YOLO12_MODEL=${TRITON_YOLO12_MODEL:-yolo12}
+    volumes:
+      - ../models:/app/models:ro
+      - ../CustomBoostTrack:/app/CustomBoostTrack:ro
+    restart: unless-stopped
+
+  mot-tests:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      target: tests
+      args:
+        BASE_IMAGE: ${BASE_IMAGE:-python:3.11-slim}
+        DOWNLOAD_MODELS: "0"
+    container_name: mot-tests
+    command: ["pytest", "-q", "tests"]
+    environment:
+      - ENV=test
+      - QUEUE_MODE=inline
+      - PROJECT_ROOT=/app
+      - UPLOAD_DIR=/app/var/uploads
+      - RESULTS_DIR=/app/var/results
+    volumes:
+      - mot-uploads:/app/var/uploads
+      - mot-results:/app/var/results
+    restart: "no"
+    healthcheck:
+      disable: true
+
+  mot-itests:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      target: tests
+      args:
+        BASE_IMAGE: ${BASE_IMAGE:-python:3.11-slim}
+        DOWNLOAD_MODELS: "0"
+    container_name: mot-itests
+    profiles:
+      - itest
+    command: ["pytest", "-q", "tests/test_queue_integration.py"]
+    environment:
+      - ENV=test
+      - QUEUE_MODE=rq
+      - REDIS_URL=redis://redis:6379/0
+      - MOT_PIPELINE=stub
+      - RUN_QUEUE_INTEGRATION=1
+    depends_on:
+      redis:
+        condition: service_started
+    restart: "no"
+    healthcheck:
+      disable: true
+
+  triton:
+    image: nvcr.io/nvidia/tritonserver:24.10-py3
+    container_name: mot-triton
+    profiles:
+      - triton
+      - triton-itest
+    depends_on:
+      model-init:
+        condition: service_completed_successfully
+    command: ["tritonserver", "--model-repository=/models"]
+    ports:
+      - "8000:8000"  # HTTP
+      - "8001:8001"  # gRPC
+      - "8002:8002"  # metrics
+    volumes:
+      - triton-model-repo:/models
+    restart: unless-stopped
+
+  model-init:
+    image: ghcr.io/oras-project/oras:v1.2.0
+    container_name: mot-model-init
+    profiles:
+      - triton
+      - triton-itest
+    environment:
+      # Example: ghcr.io/your-org/mot-triton-models@sha256:<digest>
+      - TRITON_MODEL_REPO_REF=${TRITON_MODEL_REPO_REF:-}
+      # Set to 1 for local/insecure HTTP registries (e.g. mot-registry:5000)
+      - ORAS_PLAIN_HTTP=${ORAS_PLAIN_HTTP:-0}
+    volumes:
+      - triton-model-repo:/models
+    entrypoint: ["/bin/sh", "-lc"]
+    command:
+      - |
+        set -e
+        ref="$${TRITON_MODEL_REPO_REF:-}"
+        if [ -z "$$ref" ]; then
+          echo "TRITON_MODEL_REPO_REF is not set; leaving /models as-is"
+          exit 0
+        fi
+        echo "Pulling Triton model repo: $$ref"
+
+        tmpdir="/tmp/model-repo"
+        rm -rf "$$tmpdir" && mkdir -p "$$tmpdir"
+        plain=""
+        if [ "$${ORAS_PLAIN_HTTP:-0}" = "1" ]; then
+          plain="--plain-http"
+        fi
+        oras pull $$plain "$$ref" -o "$$tmpdir"
+
+        rm -rf /models/*
+
+        # Preferred format: a single tar.gz layer containing the full model repository.
+        # This matches scripts/publish_triton_model_repo_oci.sh
+        archive="$(ls -1 "$$tmpdir"/*.tar.gz 2>/dev/null | head -n 1 || true)"
+        if [ -n "$$archive" ]; then
+          echo "Extracting model repo archive: $$archive"
+          tar -xzf "$$archive" -C /models
+        else
+          echo "No archive detected; copying pulled files into /models"
+          cp -a "$$tmpdir"/. /models/
+        fi
+
+        echo "Model repo contents:"
+        ls -la /models
+    restart: "no"
+
+  mot-triton-itests:
+    profiles:
+      - triton-itest
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      target: itest-ml
+      args:
+        BASE_IMAGE: ${BASE_IMAGE:-python:3.11-slim}
+        DOWNLOAD_MODELS: "0"
+    container_name: mot-triton-itests
+    environment:
+      - ENV=test
+      - RUN_TRITON_INTEGRATION=1
+      - TRITON_URL=triton:8001
+      - TRITON_MODEL_REPO_REF=${TRITON_MODEL_REPO_REF:-}
+      - TRITON_YOLO11_MODEL=${TRITON_YOLO11_MODEL:-yolo11}
+      - TRITON_YOLO12_MODEL=${TRITON_YOLO12_MODEL:-yolo12}
+    depends_on:
+      model-init:
+        condition: service_completed_successfully
+      triton:
+        condition: service_started
+    restart: "no"
+
 volumes:
   mot-uploads:
     name: mot-uploads
   mot-results:
     name: mot-results
+  triton-model-repo:
+    name: triton-model-repo

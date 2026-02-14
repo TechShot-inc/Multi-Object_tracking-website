@@ -32,6 +32,11 @@ body {
     padding: 0;
 }
 
+/* Fallback for Tailwind's `hidden` utility (in case the CDN script is blocked). */
+.hidden {
+    display: none !important;
+}
+
 /* Header */
 header {
     background: var(--premium-gradient);
