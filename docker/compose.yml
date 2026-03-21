@@ -123,7 +123,6 @@ services:
       - YOLO12_MODEL_PATH=/app/models/yolo12x.pt
       - REID_MODEL_PATH=/app/models/osnet_ain_ms_m_c.pth.tar
       - MOT_PIPELINE=boosttrack
-      - YOLO_MODEL_PATH=/app/models/yolov8n.pt
       - YOLO_CONFIG_DIR=/tmp/Ultralytics
     volumes:
       - mot-uploads:/app/var/uploads
@@ -272,9 +271,20 @@ services:
       - |
         set -e
         ref="$${TRITON_MODEL_REPO_REF:-}"
+        host_repo="$${TRITON_HOST_MODEL_REPO:-}"
         if [ -z "$$ref" ]; then
-          echo "TRITON_MODEL_REPO_REF is not set; leaving /models as-is"
-          exit 0
+          if [ -n "$$host_repo" ]; then
+            echo "TRITON_HOST_MODEL_REPO is set; assuming /models is provided externally; skipping ORAS pull"
+            exit 0
+          fi
+          if [ -n "$(ls -A /models 2>/dev/null || true)" ]; then
+            echo "TRITON_MODEL_REPO_REF is not set; using existing /models contents"
+            ls -la /models || true
+            exit 0
+          fi
+          echo "TRITON_MODEL_REPO_REF is not set and /models is empty." >&2
+          echo "Fix: set TRITON_MODEL_REPO_REF (OCI) OR use docker/compose.triton.localrepo.yml with TRITON_HOST_MODEL_REPO." >&2
+          exit 2
         fi
         echo "Pulling Triton model repo: $$ref"
 

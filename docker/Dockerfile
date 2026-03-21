@@ -71,7 +71,6 @@ FROM base AS worker
 
 COPY CustomBoostTrack/ ./CustomBoostTrack/
 RUN mkdir -p /app/models
-COPY yolov8n.pt /app/models/yolov8n.pt
 
 ENV UV_PROJECT_ENVIRONMENT=/app/.venv \
     PATH=/app/.venv/bin:$PATH
@@ -152,7 +151,7 @@ COPY scripts/ ./scripts/
 COPY CustomBoostTrack/ ./CustomBoostTrack/
 
 RUN mkdir -p /app/models
-COPY yolov8n.pt /app/models/yolov8n.pt
+
 
 # Optional: set TORCH_INDEX_URL to help pip select CUDA wheels on GPU builds.
 # Example (CUDA 12.4): https://download.pytorch.org/whl/cu124

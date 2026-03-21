@@ -158,4 +158,6 @@ sudo ./svc.sh status
 Notes:
 
 - The GPU benchmark workflow is manual (`workflow_dispatch`) and includes concurrency so only one GPU bench job runs at a time.
+- GitHub Actions runs a workflow from a specific branch/SHA. If you click **Re-run jobs**, it reuses the old SHA (so it will not pick up workflow fixes). To pick up the latest workflow changes, use **Run workflow** and select the intended branch (typically `main`).
+- The Triton GPU benchmark expects a Triton model repository on the runner host (default: `/mnt/Extra/mot-triton-model-repo`). You can change it in the workflow inputs when dispatching.
 - Avoid using self-hosted runners for untrusted code (for example, auto-running fork PRs) since the runner has access to your machine.
