@@ -4,6 +4,7 @@ from .app_factory import create_app
 from .config import load_settings
 import uvicorn
 
+
 def main() -> None:
     settings = load_settings()
     debug = settings.environment == "dev"
@@ -22,6 +23,7 @@ def main() -> None:
 
     app = create_app()
     uvicorn.run(app, host=settings.host, port=settings.port, log_level="info")
+
 
 if __name__ == "__main__":
     main()

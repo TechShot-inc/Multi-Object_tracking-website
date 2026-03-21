@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from io import BytesIO
 from pathlib import Path
 
 import pytest
@@ -14,6 +13,7 @@ def app(tmp_path: Path):
     # Override dirs via env vars before app creation
     # (load_settings reads env vars)
     import os
+
     os.environ["PROJECT_ROOT"] = str(tmp_path)
     os.environ["UPLOAD_DIR"] = str(tmp_path / "var" / "uploads")
     os.environ["RESULTS_DIR"] = str(tmp_path / "var" / "results")

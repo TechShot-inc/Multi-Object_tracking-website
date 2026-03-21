@@ -50,4 +50,3 @@ def test_enqueue_video_job_sets_redis_status(monkeypatch):
     assert status is not None
     assert status["state"] == "queued"
     assert status["job_id"] == "job-abc"
-

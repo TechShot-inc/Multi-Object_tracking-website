@@ -8,9 +8,7 @@ ensuring that the pipeline produces output in the expected format regardless of 
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
-from typing import Any
 
 import pytest
 
@@ -40,9 +38,7 @@ def fake_video(temp_dirs: tuple[Path, Path]) -> Path:
 class TestPipelineContract:
     """Tests for the pipeline output contract."""
 
-    def test_run_video_creates_output_directory(
-        self, fake_video: Path, temp_dirs: tuple[Path, Path]
-    ) -> None:
+    def test_run_video_creates_output_directory(self, fake_video: Path, temp_dirs: tuple[Path, Path]) -> None:
         """Pipeline should create output directory if it doesn't exist."""
         _, output_dir = temp_dirs
         nested_output = output_dir / "nested" / "deep"
@@ -52,9 +48,7 @@ class TestPipelineContract:
         assert nested_output.exists()
         assert nested_output.is_dir()
 
-    def test_run_video_creates_annotations_file(
-        self, fake_video: Path, temp_dirs: tuple[Path, Path]
-    ) -> None:
+    def test_run_video_creates_annotations_file(self, fake_video: Path, temp_dirs: tuple[Path, Path]) -> None:
         """Pipeline must create annotations.json in output directory."""
         _, output_dir = temp_dirs
         job_output = output_dir / "job_001"
@@ -64,9 +58,7 @@ class TestPipelineContract:
         annotations_file = job_output / "annotations.json"
         assert annotations_file.exists(), "Pipeline must create annotations.json"
 
-    def test_annotations_is_valid_json(
-        self, fake_video: Path, temp_dirs: tuple[Path, Path]
-    ) -> None:
+    def test_annotations_is_valid_json(self, fake_video: Path, temp_dirs: tuple[Path, Path]) -> None:
         """Annotations file must contain valid JSON."""
         _, output_dir = temp_dirs
         job_output = output_dir / "job_002"
@@ -80,9 +72,7 @@ class TestPipelineContract:
         data = json.loads(content)
         assert isinstance(data, dict)
 
-    def test_annotations_has_required_fields(
-        self, fake_video: Path, temp_dirs: tuple[Path, Path]
-    ) -> None:
+    def test_annotations_has_required_fields(self, fake_video: Path, temp_dirs: tuple[Path, Path]) -> None:
         """Annotations must contain required contract fields."""
         _, output_dir = temp_dirs
         job_output = output_dir / "job_003"
@@ -97,9 +87,7 @@ class TestPipelineContract:
         assert "created_at_unix" in data, "Must include creation timestamp"
         assert "tracks" in data, "Must include tracks list"
 
-    def test_annotations_tracks_is_list(
-        self, fake_video: Path, temp_dirs: tuple[Path, Path]
-    ) -> None:
+    def test_annotations_tracks_is_list(self, fake_video: Path, temp_dirs: tuple[Path, Path]) -> None:
         """Tracks field must be a list."""
         _, output_dir = temp_dirs
         job_output = output_dir / "job_004"
@@ -111,9 +99,7 @@ class TestPipelineContract:
 
         assert isinstance(data["tracks"], list), "tracks must be a list"
 
-    def test_annotations_preserves_params(
-        self, fake_video: Path, temp_dirs: tuple[Path, Path]
-    ) -> None:
+    def test_annotations_preserves_params(self, fake_video: Path, temp_dirs: tuple[Path, Path]) -> None:
         """Pipeline should store the params used for processing."""
         _, output_dir = temp_dirs
         job_output = output_dir / "job_005"
@@ -127,9 +113,7 @@ class TestPipelineContract:
         assert "params" in data, "Must include params used"
         assert data["params"] == params, "Params should be preserved exactly"
 
-    def test_annotations_source_video_is_string(
-        self, fake_video: Path, temp_dirs: tuple[Path, Path]
-    ) -> None:
+    def test_annotations_source_video_is_string(self, fake_video: Path, temp_dirs: tuple[Path, Path]) -> None:
         """source_video field must be a string path."""
         _, output_dir = temp_dirs
         job_output = output_dir / "job_006"
@@ -141,9 +125,7 @@ class TestPipelineContract:
 
         assert isinstance(data["source_video"], str)
 
-    def test_annotations_created_at_is_integer(
-        self, fake_video: Path, temp_dirs: tuple[Path, Path]
-    ) -> None:
+    def test_annotations_created_at_is_integer(self, fake_video: Path, temp_dirs: tuple[Path, Path]) -> None:
         """created_at_unix field must be an integer timestamp."""
         _, output_dir = temp_dirs
         job_output = output_dir / "job_007"
@@ -160,9 +142,7 @@ class TestPipelineContract:
 class TestPipelineRobustness:
     """Tests for pipeline error handling and edge cases."""
 
-    def test_run_video_with_empty_params(
-        self, fake_video: Path, temp_dirs: tuple[Path, Path]
-    ) -> None:
+    def test_run_video_with_empty_params(self, fake_video: Path, temp_dirs: tuple[Path, Path]) -> None:
         """Pipeline should handle empty params dict."""
         _, output_dir = temp_dirs
         job_output = output_dir / "job_empty_params"
@@ -172,9 +152,7 @@ class TestPipelineRobustness:
 
         assert (job_output / "annotations.json").exists()
 
-    def test_run_video_with_none_roi(
-        self, fake_video: Path, temp_dirs: tuple[Path, Path]
-    ) -> None:
+    def test_run_video_with_none_roi(self, fake_video: Path, temp_dirs: tuple[Path, Path]) -> None:
         """Pipeline should handle None ROI in params."""
         _, output_dir = temp_dirs
         job_output = output_dir / "job_none_roi"
@@ -184,9 +162,7 @@ class TestPipelineRobustness:
         data = json.loads((job_output / "annotations.json").read_text())
         assert data["params"]["roi"] is None
 
-    def test_run_video_idempotent_output_dir(
-        self, fake_video: Path, temp_dirs: tuple[Path, Path]
-    ) -> None:
+    def test_run_video_idempotent_output_dir(self, fake_video: Path, temp_dirs: tuple[Path, Path]) -> None:
         """Running pipeline twice to same output should overwrite cleanly."""
         _, output_dir = temp_dirs
         job_output = output_dir / "job_idempotent"
@@ -201,14 +177,12 @@ class TestPipelineRobustness:
 
 class TestTrackFormat:
     """Tests for individual track format when tracks are present.
-    
+
     Note: These tests define the expected format for when the real
     tracking implementation is connected. The stub returns empty tracks.
     """
 
-    def test_empty_tracks_is_valid(
-        self, fake_video: Path, temp_dirs: tuple[Path, Path]
-    ) -> None:
+    def test_empty_tracks_is_valid(self, fake_video: Path, temp_dirs: tuple[Path, Path]) -> None:
         """Empty tracks list is valid output."""
         _, output_dir = temp_dirs
         job_output = output_dir / "job_empty_tracks"

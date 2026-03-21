@@ -5,7 +5,6 @@ Tests for error handling and edge cases in routes.
 from __future__ import annotations
 
 import os
-from io import BytesIO
 from pathlib import Path
 
 import pytest

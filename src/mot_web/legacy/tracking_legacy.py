@@ -12,6 +12,7 @@ import random
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+
 class VideoTracker:
     def __init__(self, video_path, output_dir, speed=1, output_speed=1.0, roi=None):
         """Initialize video tracker."""
@@ -29,18 +30,19 @@ class VideoTracker:
         self.frame_count = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
         self.output_fps = max(1, (self.fps / self.speed) * output_speed)
         self.frame_interval = max(1, int(self.fps / (self.fps / self.speed)))
-        logger.info(f"Video: {self.width}x{self.height}, {self.fps} FPS, {self.frame_count} frames, speed: {self.speed}, output_speed: {output_speed}, output FPS: {self.output_fps}, frame_interval: {self.frame_interval}")
-        
+        logger.info(
+            f"Video: {self.width}x{self.height}, {self.fps} FPS, {self.frame_count} frames, speed: {self.speed}, output_speed: {output_speed}, output FPS: {self.output_fps}, frame_interval: {self.frame_interval}"
+        )
+
         self.roi = None
         if roi:
             if isinstance(roi, dict):
-                required_keys = ['x', 'y', 'width', 'height']
+                required_keys = ["x", "y", "width", "height"]
                 if not all(k in roi for k in required_keys):
                     logger.error(f"Invalid ROI dictionary: {roi}")
                     raise ValueError("ROI dictionary must contain x, y, width, height")
                 try:
-                    self.roi = [int(roi['x']), int(roi['y']), 
-                               int(roi['width']), int(roi['height'])]
+                    self.roi = [int(roi["x"]), int(roi["y"]), int(roi["width"]), int(roi["height"])]
                 except (ValueError, TypeError) as e:
                     logger.error(f"Invalid ROI values: {roi}, error: {e}")
                     raise ValueError(f"ROI values must be numeric: {roi}")
@@ -53,7 +55,7 @@ class VideoTracker:
             else:
                 logger.error(f"Invalid ROI format: {roi}")
                 raise ValueError("ROI must be a list/tuple of [x, y, w, h] or a dictionary")
-            
+
             roi_x, roi_y, roi_w, roi_h = self.roi
             if roi_x < 0 or roi_y < 0 or roi_w <= 0 or roi_h <= 0:
                 logger.error(f"Invalid ROI dimensions: {self.roi}")
@@ -61,7 +63,7 @@ class VideoTracker:
             if roi_x + roi_w > self.width or roi_y + roi_h > self.height:
                 logger.error(f"ROI exceeds video dimensions: {self.roi}")
                 raise ValueError(f"ROI exceeds video dimensions: {self.width}x{self.height}")
-        
+
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         self.output_video_path = os.path.join(output_dir, f"annotated_video_web_{timestamp}.mp4")
         self.frames_path = os.path.join(output_dir, f"frames_{timestamp}")
@@ -73,7 +75,7 @@ class VideoTracker:
             "velocity_heatmap": None,
             "top_ids": [],
             "crops": [],
-            "avg_velocity": 0.0
+            "avg_velocity": 0.0,
         }
         self.tracks = {}
         self.velocities = {}
@@ -154,10 +156,8 @@ class VideoTracker:
         if self.roi:
             roi_x, roi_y, roi_w, roi_h = self.roi
             try:
-                cv2.rectangle(frame, (roi_x, roi_y), (roi_x + roi_w, roi_y + roi_h),
-                             (45, 212, 191), 2)
-                cv2.putText(frame, "ROI", (roi_x + 5, roi_y - 5),
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
+                cv2.rectangle(frame, (roi_x, roi_y), (roi_x + roi_w, roi_y + roi_h), (45, 212, 191), 2)
+                cv2.putText(frame, "ROI", (roi_x + 5, roi_y - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
             except Exception as e:
                 logger.error(f"Error drawing ROI {self.roi}: {e}")
                 raise
@@ -177,8 +177,7 @@ class VideoTracker:
                     self.id_to_color[track_id] = [random.randint(0, 255) for _ in range(3)]
                 color = tuple(self.id_to_color[track_id])
                 cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
-                cv2.putText(frame, f"ID {int(track_id)}", (x1, y1 - 10),
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+                cv2.putText(frame, f"ID {int(track_id)}", (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
                 self.density_map[y1:y2, x1:x2] += 1
                 center_x, center_y = (x1 + x2) // 2, (y1 + y2) // 2
                 if track_id not in self.velocities:
@@ -193,14 +192,9 @@ class VideoTracker:
                         self.velocities[track_id].append(velocity)
                         self.velocity_map[y1:y2, x1:x2] += velocity
                 self.tracks[track_id] = (center_x, center_y, frame_id)
-                frame_detections.append({
-                    "id": int(track_id),
-                    "x": x1,
-                    "y": y1,
-                    "width": x2 - x1,
-                    "height": y2 - y1,
-                    "confidence": conf
-                })
+                frame_detections.append(
+                    {"id": int(track_id), "x": x1, "y": y1, "width": x2 - x1, "height": y2 - y1, "confidence": conf}
+                )
             except Exception as e:
                 logger.error(f"Error drawing detection {det}: {str(e)}")
                 continue
@@ -212,23 +206,24 @@ class VideoTracker:
             return None
         normalized = cv2.normalize(data_map, None, 0, 255, cv2.NORM_MINMAX)
         heatmap = cv2.applyColorMap(normalized.astype(np.uint8), cv2.COLORMAP_JET)
-        _, buffer = cv2.imencode('.png', heatmap)
-        return base64.b64encode(buffer).decode('utf-8')
+        _, buffer = cv2.imencode(".png", heatmap)
+        return base64.b64encode(buffer).decode("utf-8")
 
     def process_video(self, detections_list):
         """Process video using sampled frames and GBI detections."""
         # Extract sampled frames
         self.extract_frames()
-        images = [os.path.join(self.frames_path, path) for path in os.listdir(self.frames_path) if path.endswith('.jpg')]
+        images = [
+            os.path.join(self.frames_path, path) for path in os.listdir(self.frames_path) if path.endswith(".jpg")
+        ]
         images = sorted(images)
         if not images:
             logger.error(f"No frames extracted in {self.frames_path}")
             raise Exception("No frames extracted")
 
         # Initialize video writer
-        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-        out = cv2.VideoWriter(self.output_video_path, fourcc, self.output_fps,
-                             (self.width, self.height))
+        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+        out = cv2.VideoWriter(self.output_video_path, fourcc, self.output_fps, (self.width, self.height))
         if not out.isOpened():
             logger.error(f"Failed to open video writer: {self.output_video_path}")
             raise Exception("Failed to open video writer")
@@ -265,8 +260,9 @@ class VideoTracker:
         self.analytics_data["avg_velocity"] = total_velocity / total_count if total_count > 0 else 0.0
 
         # Get top track IDs
-        top_ids = sorted(self.analytics_data["track_durations"],
-                        key=self.analytics_data["track_durations"].get, reverse=True)[:5]
+        top_ids = sorted(
+            self.analytics_data["track_durations"], key=self.analytics_data["track_durations"].get, reverse=True
+        )[:5]
         self.analytics_data["top_ids"] = [int(id) for id in top_ids]
 
         # Generate crops for top tracks
@@ -292,8 +288,8 @@ class VideoTracker:
                                 continue
                             crop = frame[y1:y2, x1:x2]
                             if crop.size > 0:
-                                _, buffer = cv2.imencode('.jpg', crop)
-                                crops.append(base64.b64encode(buffer).decode('utf-8'))
+                                _, buffer = cv2.imencode(".jpg", crop)
+                                crops.append(base64.b64encode(buffer).decode("utf-8"))
                 frame_idx += 1
             self.analytics_data["crops"].append(crops)
         cap.release()
@@ -301,19 +297,19 @@ class VideoTracker:
         # Save analytics
         analytics_path = os.path.join(self.output_dir, "analytics.json")
         try:
-            with open(analytics_path, 'w') as f:
+            with open(analytics_path, "w") as f:
                 json.dump(self.analytics_data, f, indent=4)
             file_size = os.path.getsize(analytics_path)
             if file_size <= 2:
-                direct_path = os.path.join(self.output_dir, 'analytics_direct.json')
-                with open(direct_path, 'w') as f:
+                direct_path = os.path.join(self.output_dir, "analytics_direct.json")
+                with open(direct_path, "w") as f:
                     f.write(json.dumps(self.analytics_data, indent=2))
                 if os.path.getsize(direct_path) > 10:
                     shutil.copy2(direct_path, analytics_path)
         except Exception:
             logger.warning("Failed to save full analytics, saving fallback")
             fallback_data = {"1": tracking_data.get("1", [])}
-            with open(analytics_path, 'w') as f:
+            with open(analytics_path, "w") as f:
                 json.dump(fallback_data, f)
 
         # Clean up frames
@@ -326,6 +322,7 @@ class VideoTracker:
         """Clean up resources."""
         if os.path.exists(self.output_dir):
             shutil.rmtree(self.output_dir)
+
 
 def process_video_with_tracking(video_path, output_dir, detections, speed=1, output_speed=1.0, roi=None):
     """Main function to process video with tracking."""

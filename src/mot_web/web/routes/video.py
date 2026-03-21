@@ -121,7 +121,7 @@ def get_annotations(request: Request, job_id: str, download: int | None = Query(
     """Return the annotations.json file for a completed job."""
     settings = request.app.state.settings
     annotations_path = settings.results_dir / job_id / "annotations.json"
-    
+
     if not annotations_path.exists():
         return JSONResponse(status_code=404, content={"error": "annotations not found"})
 
@@ -138,17 +138,17 @@ def get_result_video(request: Request, job_id: str, download: int | None = Query
     """Return the processed video for a completed job."""
     settings = request.app.state.settings
     job_dir = settings.results_dir / job_id
-    
+
     # Look for output video (could be various names depending on pipeline)
     video_candidates = ["annotated_video.mp4", "output.mp4", "annotated.mp4", "result.mp4"]
     video_path = None
-    
+
     for candidate in video_candidates:
         path = job_dir / candidate
         if path.exists():
             video_path = path
             break
-    
+
     # Fallback: return the original uploaded video if no processed video exists
     if video_path is None:
         svc = _get_service(request)
@@ -157,7 +157,7 @@ def get_result_video(request: Request, job_id: str, download: int | None = Query
             original_path = settings.upload_dir / st["filename"]
             if original_path.exists():
                 video_path = original_path
-    
+
     if video_path is None:
         return JSONResponse(status_code=404, content={"error": "video not found"})
 
@@ -170,32 +170,32 @@ def get_analytics(request: Request, job_id: str):
     """Return analytics data for a completed job."""
     settings = request.app.state.settings
     job_dir = settings.results_dir / job_id
-    
+
     # Check if analytics file exists
     analytics_path = job_dir / "analytics.json"
     if analytics_path.exists():
         return FileResponse(path=str(analytics_path), media_type="application/json")
-    
+
     # Generate analytics from annotations if available
     annotations_path = job_dir / "annotations.json"
     if not annotations_path.exists():
         return JSONResponse(status_code=404, content={"error": "analytics not available"})
-    
+
     try:
         annotations = json.loads(annotations_path.read_text(encoding="utf-8"))
-        
+
         # Extract analytics from annotations
         tracks = annotations.get("tracks", [])
         object_counts = annotations.get("object_counts", {})
         summary = annotations.get("summary", {})
-        
+
         # Build track durations
         track_durations = {}
         for track in tracks:
             track_id = track.get("id", 0)
             duration = track.get("duration_frames", len(track.get("detections", [])))
             track_durations[str(track_id)] = duration
-        
+
         analytics = {
             "total_tracks": summary.get("total_tracks", len(tracks)),
             "avg_objects_per_frame": summary.get("avg_objects_per_frame", 0),
@@ -207,4 +207,3 @@ def get_analytics(request: Request, job_id: str):
         return analytics
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": f"failed to generate analytics: {str(e)}"})
-

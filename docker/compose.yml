@@ -53,6 +53,7 @@ services:
 
   # Production service
   mot-web-prod:
+    image: mot-web-prod
     build:
       context: ..
       dockerfile: docker/Dockerfile
@@ -165,9 +166,9 @@ services:
       - REALTIME_TIMING=${REALTIME_TIMING:-}
       - REALTIME_PREVIEW_MAX_W=${REALTIME_PREVIEW_MAX_W:-}
       - REALTIME_PREVIEW_JPEG_QUALITY=${REALTIME_PREVIEW_JPEG_QUALITY:-}
-      - REALTIME_TRITON_PARALLEL=${REALTIME_TRITON_PARALLEL:-}
-      - REALTIME_TRITON_SHARED_PREPROCESS=${REALTIME_TRITON_SHARED_PREPROCESS:-}
-      - REALTIME_WBF_TOPK=${REALTIME_WBF_TOPK:-}
+      - REALTIME_TRITON_PARALLEL=${REALTIME_TRITON_PARALLEL:-0}
+      - REALTIME_TRITON_SHARED_PREPROCESS=${REALTIME_TRITON_SHARED_PREPROCESS:-1}
+      - REALTIME_WBF_TOPK=${REALTIME_WBF_TOPK:-200}
       - REALTIME_WBF_SKIP_BOX_THR=${REALTIME_WBF_SKIP_BOX_THR:-}
       - TRITON_NMS_IOU=${TRITON_NMS_IOU:-}
       - TRITON_PRE_TOPK=${TRITON_PRE_TOPK:-}
@@ -187,6 +188,7 @@ services:
     restart: unless-stopped
 
   mot-tests:
+    image: mot-tests
     build:
       context: ..
       dockerfile: docker/Dockerfile

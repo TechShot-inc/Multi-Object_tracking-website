@@ -42,26 +42,35 @@ class TrackingService:
             job_dir=job_dir,
         )
 
-        self._write_json(job_dir / "meta.json", {
-            "job_id": job_id,
-            "filename": filename,
-            "created_at_unix": int(time.time()),
-        })
-        self._write_json(job_dir / "status.json", {
-            "state": "created",   # created -> running -> done/failed
-            "message": "",
-            "updated_at_unix": int(time.time()),
-        })
+        self._write_json(
+            job_dir / "meta.json",
+            {
+                "job_id": job_id,
+                "filename": filename,
+                "created_at_unix": int(time.time()),
+            },
+        )
+        self._write_json(
+            job_dir / "status.json",
+            {
+                "state": "created",  # created -> running -> done/failed
+                "message": "",
+                "updated_at_unix": int(time.time()),
+            },
+        )
 
         return job
 
     def set_status(self, job_id: str, state: str, message: str = "") -> None:
         job_dir = self.results_dir / job_id
-        self._write_json(job_dir / "status.json", {
-            "state": state,
-            "message": message,
-            "updated_at_unix": int(time.time()),
-        })
+        self._write_json(
+            job_dir / "status.json",
+            {
+                "state": state,
+                "message": message,
+                "updated_at_unix": int(time.time()),
+            },
+        )
 
     def get_status(self, job_id: str) -> dict[str, Any]:
         job_dir = self.results_dir / job_id

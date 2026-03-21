@@ -31,9 +31,14 @@ def _get_status_redis(r: redis.Redis, job_id: str) -> dict[str, Any] | None:
     if not raw:
         return None
     try:
+        raw_str: str
         if isinstance(raw, (bytes, bytearray)):
-            raw = raw.decode("utf-8", errors="replace")
-        return json.loads(raw)
+            raw_str = raw.decode("utf-8", errors="replace")
+        elif isinstance(raw, memoryview):
+            raw_str = raw.tobytes().decode("utf-8", errors="replace")
+        else:
+            raw_str = str(raw)
+        return json.loads(raw_str)
     except Exception:
         return None
 

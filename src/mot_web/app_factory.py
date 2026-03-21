@@ -22,6 +22,7 @@ class _NoCacheStaticFiles(StaticFiles):
         response.headers["Cache-Control"] = "no-store"
         return response
 
+
 def create_app() -> FastAPI:
     settings = load_settings()
 

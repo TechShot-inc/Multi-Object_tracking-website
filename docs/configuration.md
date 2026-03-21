@@ -95,6 +95,15 @@ The realtime backend returns an annotated JPEG preview. You can reduce CPU and b
 
 - `REALTIME_TIMING=1` adds `timing_ms` to each WS metadata message.
 
+### Triton concurrency (GPU memory)
+
+- `REALTIME_TRITON_PARALLEL`: when `1`, YOLO11 and YOLO12 inference calls may overlap.
+
+Notes:
+
+- This can improve throughput, but on some GPUs it can trigger Triton/ONNXRuntime CUDA OOM.
+- If you see Triton errors like `CUDA failure 2: out of memory` or `SafeInt... Integer overflow`, set `REALTIME_TRITON_PARALLEL=0` and restart `mot-realtime` (and restart `mot-triton` once to clear the error state).
+
 ## WBF workload reduction (still ensemble)
 
 To keep the ensemble but reduce fusion cost:

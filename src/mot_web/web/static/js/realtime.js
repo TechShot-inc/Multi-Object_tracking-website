@@ -71,6 +71,11 @@ const clearLineButton = document.getElementById('clear-line');
 const personsInsideSpan = document.getElementById('persons-inside');
 const personsOutsideSpan = document.getElementById('persons-outside');
 
+function resetCountersUI() {
+    personsInsideSpan.textContent = '0';
+    personsOutsideSpan.textContent = '0';
+}
+
 function initializeWebcam() {
     dlog('Initializing webcam UI');
     resetRoiState();
@@ -440,9 +445,11 @@ function processFrames(timestamp) {
                 document.getElementById('realtime-loading').classList.add('hidden');
 
                 // Update counts
-                if (meta && meta.counts) {
-                    personsInsideSpan.textContent = meta.counts.inside || 0;
-                    personsOutsideSpan.textContent = meta.counts.outside || 0;
+                if (lineX === null) {
+                    resetCountersUI();
+                } else if (meta && meta.counts) {
+                    personsInsideSpan.textContent = meta.counts.inside ?? 0;
+                    personsOutsideSpan.textContent = meta.counts.outside ?? 0;
                 }
 
                 // Surface whether the real BoostTrack+YOLO tracker is running.
@@ -766,6 +773,9 @@ drawLineButton.addEventListener('click', () => {
 clearLineButton.addEventListener('click', () => {
     dlog('Clear Line clicked');
     resetLineState();
+    resetCountersUI();
+    // Force config to be re-sent even if the current state matches the last sent state.
+    lastConfigKey = null;
     document.getElementById('realtime-status').querySelector('.status-message').textContent = 'Line cleared';
 });
 

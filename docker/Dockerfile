@@ -205,6 +205,7 @@ FROM base AS tests
 
 COPY tests/ ./tests/
 COPY pytest.ini ./pytest.ini
+COPY pyrightconfig.json ./pyrightconfig.json
 
 ENV UV_PROJECT_ENVIRONMENT=/app/.venv \
     PATH=/app/.venv/bin:$PATH

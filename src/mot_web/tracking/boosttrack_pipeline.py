@@ -214,10 +214,10 @@ def _write_annotated_video(
 ) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    fourcc = cv2.VideoWriter_fourcc(*"avc1")
+    fourcc = cv2.VideoWriter_fourcc(*"avc1")  # pyright: ignore[reportAttributeAccessIssue]
     out = cv2.VideoWriter(str(output_path), fourcc, output_fps, (width, height))
     if not out.isOpened():
-        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+        fourcc = cv2.VideoWriter_fourcc(*"mp4v")  # pyright: ignore[reportAttributeAccessIssue]
         out = cv2.VideoWriter(str(output_path), fourcc, output_fps, (width, height))
 
     if not out.isOpened():
@@ -322,10 +322,7 @@ def run_video_boosttrack(input_path: Path, output_dir: Path, params: dict[str, A
         "source_video": str(input_path),
         "created_at_unix": int(time.time()),
         "params": params,
-        "tracks": [
-            {"id": tid, "detections": dets}
-            for tid, dets in sorted(tracks.items(), key=lambda kv: kv[0])
-        ],
+        "tracks": [{"id": tid, "detections": dets} for tid, dets in sorted(tracks.items(), key=lambda kv: kv[0])],
         "frames": {str(k): v for k, v in sorted(frames.items(), key=lambda kv: kv[0])},
         "analytics": {
             "video": {"width": width, "height": height, "fps": fps, "output_fps": output_fps},

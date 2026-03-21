@@ -13,11 +13,16 @@ from fastapi.responses import HTMLResponse, JSONResponse
 
 # OpenCV/numpy are optional - graceful degradation for testing
 try:
-    import cv2
-    import numpy as np
-    CV2_AVAILABLE = True
+    import cv2 as _cv2
+    import numpy as _np
+
+    cv2 = _cv2
+    np = _np
 except ImportError:
-    CV2_AVAILABLE = False
+    cv2 = None
+    np = None
+
+CV2_AVAILABLE = cv2 is not None and np is not None
 
 router = APIRouter(prefix="/realtime")
 
@@ -29,10 +34,6 @@ _tracker_lock = threading.Lock()
 _tracker = None
 _tracker_error: str | None = None
 _frame_counter = 0
-
-_counts_inside = 0
-_counts_outside = 0
-_track_last_side: dict[int, str] = {}
 
 
 def _default_model_paths() -> dict[str, str]:
@@ -62,9 +63,7 @@ def _get_tracker():
                     "YOLO weights not found. Set YOLO11_MODEL_PATH/YOLO12_MODEL_PATH or place them under MODELS_DIR."
                 )
             if not os.path.exists(model_paths["reid"]):
-                raise FileNotFoundError(
-                    "ReID weights not found. Set REID_MODEL_PATH or place it under MODELS_DIR."
-                )
+                raise FileNotFoundError("ReID weights not found. Set REID_MODEL_PATH or place it under MODELS_DIR.")
 
             _tracker = RealTimeTracker(
                 model1_path=model_paths["yolo1"],
@@ -89,15 +88,19 @@ def _tracker_status() -> dict:
     return {"tracker_active": False, "tracker_error": err}
 
 
-def _update_line_counts(detections: list[dict], line: dict, width: int) -> dict[str, int]:
-    global _counts_inside, _counts_outside
+def _line_occupancy_counts(detections: list[dict], line: dict, width: int) -> dict[str, int]:
+    """Compute current inside/outside occupancy relative to a vertical line.
+
+    This is stateless on purpose: counts update immediately and never "stack".
+    """
 
     line_x = int(float(line.get("x", 0.5)) * width)
     inside_side = "left" if line.get("position") == "left" else "right"
 
+    inside = 0
+    outside = 0
     for det in detections:
         try:
-            track_id = int(det["id"])
             x = float(det["x"])
             w = float(det["width"])
         except Exception:
@@ -105,18 +108,12 @@ def _update_line_counts(detections: list[dict], line: dict, width: int) -> dict[
 
         cx = x + (w / 2.0)
         side = "left" if cx < line_x else "right"
-        prev = _track_last_side.get(track_id)
-        if prev is None:
-            _track_last_side[track_id] = side
-            continue
-        if prev != side:
-            if side == inside_side:
-                _counts_inside += 1
-            else:
-                _counts_outside += 1
-            _track_last_side[track_id] = side
+        if side == inside_side:
+            inside += 1
+        else:
+            outside += 1
 
-    return {"inside": int(_counts_inside), "outside": int(_counts_outside)}
+    return {"inside": int(inside), "outside": int(outside)}
 
 
 @router.get("/", response_class=HTMLResponse)
@@ -131,7 +128,7 @@ async def realtime_track_fastapi(
     roi: str | None = Form(default=None),
     line: str | None = Form(default=None),
 ):
-    if not CV2_AVAILABLE:
+    if cv2 is None or np is None:
         return JSONResponse(status_code=503, content={"error": "OpenCV not installed - realtime tracking unavailable"})
 
     if frame is None:
@@ -233,12 +230,14 @@ async def realtime_track_fastapi(
         2,
     )
 
-    _, buffer = cv2.imencode(".jpg", annotated_frame)
-    encoded_frame = base64.b64encode(buffer).decode("utf-8")
+    ok, buffer = cv2.imencode(".jpg", annotated_frame)
+    if not ok:
+        raise RuntimeError("cv2.imencode failed")
+    encoded_frame = base64.b64encode(buffer.tobytes()).decode("utf-8")
 
     counts = {"inside": 0, "outside": 0}
     if line_obj:
-        counts = _update_line_counts(detections, line=line_obj, width=w)
+        counts = _line_occupancy_counts(detections, line=line_obj, width=w)
 
     resp = {
         "annotated": encoded_frame,
@@ -296,11 +295,10 @@ async def realtime_ws(ws: WebSocket):
                 pass
         return
 
-    if not CV2_AVAILABLE:
+    if cv2 is None or np is None:
         await ws.send_json({"error": "OpenCV not installed - realtime tracking unavailable"})
         await ws.close(code=1011)
         return
-
     roi_obj: dict | None = None
     line_obj: dict | None = None
 
@@ -367,7 +365,15 @@ async def realtime_ws(ws: WebSocket):
                     line_x = int(float(line_obj["x"]) * w)
                     cv2.line(annotated_frame, (line_x, 0), (line_x, h), (255, 0, 0), 2)
                     side = "L" if line_obj["position"] == "left" else "R"
-                    cv2.putText(annotated_frame, f"Count Line ({side})", (line_x + 5, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 0, 0), 2)
+                    cv2.putText(
+                        annotated_frame,
+                        f"Count Line ({side})",
+                        (line_x + 5, 30),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.6,
+                        (255, 0, 0),
+                        2,
+                    )
                 except Exception:
                     pass
 
@@ -381,7 +387,9 @@ async def realtime_ws(ws: WebSocket):
                 except Exception:
                     continue
                 cv2.rectangle(annotated_frame, (x1, y1), (x2, y2), (0, 255, 255), 2)
-                cv2.putText(annotated_frame, f"ID {tid}", (x1, max(0, y1 - 10)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+                cv2.putText(
+                    annotated_frame, f"ID {tid}", (x1, max(0, y1 - 10)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2
+                )
 
             cv2.putText(
                 annotated_frame,
@@ -393,12 +401,15 @@ async def realtime_ws(ws: WebSocket):
                 2,
             )
 
-            _, buffer = cv2.imencode(".jpg", annotated_frame)
-            encoded_frame = base64.b64encode(buffer).decode("utf-8")
+            ok, buffer = cv2.imencode(".jpg", annotated_frame)
+            if not ok:
+                await ws.send_json({"error": "cv2.imencode failed"})
+                continue
+            encoded_frame = base64.b64encode(buffer.tobytes()).decode("utf-8")
 
             counts = {"inside": 0, "outside": 0}
             if line_obj and isinstance(line_obj, dict):
-                counts = _update_line_counts(detections, line=line_obj, width=w)
+                counts = _line_occupancy_counts(detections, line=line_obj, width=w)
 
             resp = {
                 "annotated": encoded_frame,
