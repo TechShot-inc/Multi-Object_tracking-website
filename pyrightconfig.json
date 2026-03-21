@@ -1,0 +1,17 @@
+{
+  "include": ["src", "tests"],
+  "exclude": [
+    "**/__pycache__",
+    ".venv",
+    "build",
+    "dist",
+    "var",
+    "src/mot_web/legacy",
+    "CustomBoostTrack/external",
+    "CustomBoostTrack/weights"
+  ],
+  "venvPath": ".",
+  "typeCheckingMode": "basic",
+  "reportMissingImports": false,
+  "reportMissingTypeStubs": false
+}

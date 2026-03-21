@@ -3,6 +3,7 @@ var/
 *.mp4
 *.avi
 *.json
+!pyrightconfig.json
 
 # Local-only internal notes / generated summaries
 docs/internal/
