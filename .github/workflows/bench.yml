@@ -1,0 +1,53 @@
+name: Benchmarks (Docker)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  realtime-http-smoke:
+    name: Realtime HTTP benchmark smoke
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build images
+        run: |
+          docker compose -f docker/compose.yml --profile prod build mot-web-prod
+          docker compose -f docker/compose.yml build mot-tests
+
+      - name: Start web
+        run: docker compose -f docker/compose.yml --profile prod up -d mot-web-prod
+
+      - name: Wait for health
+        run: |
+          set -e
+          for i in $(seq 1 30); do
+            if docker exec mot-web-prod python -c "import urllib.request; urllib.request.urlopen('http://localhost:5000/health')" >/dev/null 2>&1; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "web healthcheck timed out" >&2
+          docker compose -f docker/compose.yml --profile prod logs --no-color mot-web-prod || true
+          exit 1
+
+      - name: Run benchmark
+        run: |
+          docker run --rm --network container:mot-web-prod mot-tests \
+            python scripts/benchmark_realtime.py --base-url http://127.0.0.1:5000 --frames 200 --warmup 20 --out - \
+            > benchmark_realtime_http.json
+
+      - name: Upload benchmark artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-realtime-http
+          path: benchmark_realtime_http.json
+
+      - name: Teardown
+        if: always()
+        run: docker compose -f docker/compose.yml --profile prod down -v

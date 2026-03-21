@@ -35,6 +35,9 @@ CPU-only (fast to get running):
    - `models/yolo12x.pt`
    - `models/osnet_ain_ms_m_c.pth.tar`
 
+  Note: model weights are not committed to git (they are intentionally ignored). To download the defaults:
+  - `python scripts/download_models.py --models yolo11 yolo12 osnet`
+
 2) Start the web + realtime stack:
 
 `docker compose -f docker/compose.yml up -d --build`
@@ -95,5 +98,7 @@ More knobs and how they interact: [docs/configuration.md](docs/configuration.md)
 
 ## License
 
-See [CustomBoostTrack/LICENSE](CustomBoostTrack/LICENSE) for the tracking submodule’s license.
+This repository’s code is licensed under the MIT License (see [LICENSE](LICENSE)).
+
+Third-party/vendored components under `CustomBoostTrack/` and its `external/` subfolders are licensed separately; see the respective `LICENSE` files (for example: [CustomBoostTrack/LICENSE](CustomBoostTrack/LICENSE)).
 

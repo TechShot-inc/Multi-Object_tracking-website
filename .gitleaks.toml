@@ -1,0 +1,24 @@
+# Minimal gitleaks config for this repo.
+# Goal: catch real leaked credentials while avoiding noisy binary/model artifacts.
+
+[allowlist]
+paths = [
+  # Model weights / artifacts
+  '''^models/''',
+  '''^models_repo/''',
+  '''^artifacts/''',
+  '''^triton-models\.tar\.gz$''',
+  '''^yolov8n\.pt$''',
+
+  # External vendored code
+  '''^CustomBoostTrack/external/''',
+  '''^CustomBoostTrack/assets/''',
+  '''^CustomBoostTrack/data/''',
+
+  # Caches / venv
+  '''^\.venv/''',
+  '''^\.ruff_cache/''',
+  '''^CustomBoostTrack/__pycache__/''',
+  '''^src/mot_web/__pycache__/''',
+  '''^tests/__pycache__/'''
+]

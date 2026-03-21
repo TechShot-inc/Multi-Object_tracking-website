@@ -93,3 +93,27 @@ Default ports:
 - Triton HTTP/gRPC/metrics: `8000/8001/8002`
 
 If `5000` is in use, stop the conflicting process or change the `PORT` mapping.
+
+## Browser console shows WebSocket errors but tracking still works
+
+Common messages:
+
+- `Unchecked runtime.lastError: Could not establish connection. Receiving end does not exist.`
+- `Unchecked runtime.lastError: The message port closed before a response was received.`
+- `reload.js:... WebSocket connection to 'ws://127.0.0.1:5500//ws' failed`
+- `realtime.js ... Error: WebSocket timeout`
+
+What they usually mean:
+
+- The `runtime.lastError` messages are typically from a browser extension (not the app).
+- The `reload.js` WebSocket to port `5500` is typically injected by a dev server like VS Code “Live Server/Live Preview”. It is not the app’s realtime socket.
+
+How to confirm the app WebSocket works:
+
+1) Open the realtime page from the FastAPI server (not a static HTML preview):
+	- `http://localhost:5000/realtime`
+
+2) In the browser DevTools Network tab, you should see a WebSocket to:
+	- `ws://localhost:5000/realtime/ws` (or `wss://...` if you are on HTTPS)
+
+If you instead open `realtime.html` via a static server on port `5500`, the frontend will try to connect to `ws://127.0.0.1:5500/realtime/ws` and will time out.

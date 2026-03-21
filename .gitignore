@@ -4,6 +4,9 @@ var/
 *.avi
 *.json
 
+# Local-only internal notes / generated summaries
+docs/internal/
+
 # Large model artifacts / exports
 models/
 models_repo/
@@ -14,6 +17,9 @@ artifacts/
 *.tar.gz
 *.pth
 *.pth.tar
+
+# Compiled artifacts
+*.so
 
 CustomBoosttrack/
 

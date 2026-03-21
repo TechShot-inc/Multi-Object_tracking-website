@@ -1,0 +1,23 @@
+name: Secret Scan (Full Git History)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  gitleaks-history:
+    name: Gitleaks history scan (Docker)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout (full history)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Scan git history (gitleaks)
+        run: |
+          docker run --rm \
+            -v "$PWD:/repo" \
+            -w /repo \
+            zricethezav/gitleaks:v8.30.1 \
+            detect --source=/repo --redact --config=/repo/.gitleaks.toml --log-opts="--all"
