@@ -10,4 +10,6 @@
 services:
   triton:
     volumes:
-      - ../models_repo:/models:ro
+      # NOTE: This is intended for self-hosted runners and local dev.
+      # Provide a host path via TRITON_HOST_MODEL_REPO, or keep a local ./models_repo folder.
+      - ${TRITON_HOST_MODEL_REPO:-../models_repo}:/models:ro

@@ -6,11 +6,16 @@ on:
       model_repo_source:
         description: "Triton model repo source"
         required: false
-        default: "local"
+        default: "host"
         type: choice
         options:
-          - local
+          - host
           - oci
+      triton_host_model_repo:
+        description: "Host path to Triton model repo directory (used when model_repo_source=host)"
+        required: false
+        default: "/mnt/Extra/mot-triton-model-repo"
+        type: string
       triton_model_repo_ref:
         description: "OCI ref for Triton model repository (e.g. ghcr.io/org/repo@sha256:...)"
         required: false
@@ -74,6 +79,7 @@ jobs:
         env:
           DETECTOR_BACKEND: triton
           TRITON_MODEL_REPO_REF: ${{ inputs.triton_model_repo_ref }}
+          TRITON_HOST_MODEL_REPO: ${{ inputs.triton_host_model_repo }}
         run: |
           set -e
           src="${{ inputs.model_repo_source }}"
@@ -84,8 +90,15 @@ jobs:
             fi
             docker compose -f docker/compose.yml -f docker/compose.gpu.yml --profile triton up -d --build triton mot-realtime
           else
-            if [ ! -d models_repo ]; then
-              echo "models_repo/ not found in workspace; cannot use local model repo" >&2
+            repo_path="${TRITON_HOST_MODEL_REPO:-}"
+            if [ -z "$repo_path" ]; then
+              echo "triton_host_model_repo is required when model_repo_source=host" >&2
+              exit 2
+            fi
+            if [ ! -d "$repo_path" ]; then
+              echo "Host model repo path not found: $repo_path" >&2
+              echo "Create it on the runner (example):" >&2
+              echo "  mkdir -p $repo_path && cp -a /path/to/models_repo/. $repo_path/" >&2
               exit 2
             fi
             docker compose -f docker/compose.yml -f docker/compose.gpu.yml -f docker/compose.triton.localrepo.yml --profile triton up -d --build triton mot-realtime
