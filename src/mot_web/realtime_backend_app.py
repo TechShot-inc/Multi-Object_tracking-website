@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-import asyncio
 import json
 import os
+import threading
 import time
 from typing import Any
 
@@ -31,6 +31,28 @@ def _load_tracker():
         reid_path=mp["reid"],
         frame_rate=30,
     )
+
+
+_http_tracker = None
+_http_tracker_error: str | None = None
+_http_tracker_lock = threading.Lock()
+_http_frame_id = 0
+
+
+def _get_http_tracker():
+    global _http_tracker, _http_tracker_error
+    if _http_tracker is not None:
+        return _http_tracker
+    with _http_tracker_lock:
+        if _http_tracker is not None:
+            return _http_tracker
+        try:
+            _http_tracker = _load_tracker()
+            _http_tracker_error = None
+        except Exception as e:
+            _http_tracker = None
+            _http_tracker_error = str(e)
+        return _http_tracker
 
 
 def _env_int(name: str, default: int) -> int:
@@ -149,38 +171,36 @@ def _draw_overlays(frame_bgr, detections: list[dict[str, Any]], roi: dict | None
     return annotated
 
 
-def _update_line_counts(
+def _compute_line_counts(
     detections: list[dict[str, Any]],
     line: dict[str, Any],
     width: int,
-    counts: dict[str, int],
-    last_side: dict[int, str],
 ) -> dict[str, int]:
+    """Compute current inside/outside occupancy relative to a vertical line.
+
+    This is intentionally stateless so the UI updates immediately after the first
+    line is set, and clearing the line resets counts to 0.
+    """
+
     line_x = int(float(line.get("x", 0.5)) * width)
     inside_side = "left" if line.get("position") == "left" else "right"
 
+    inside = 0
+    outside = 0
     for det in detections:
         try:
-            track_id = int(det["id"])
             x = float(det["x"])
             w = float(det["width"])
         except Exception:
             continue
-
         cx = x + (w / 2.0)
         side = "left" if cx < line_x else "right"
-        prev = last_side.get(track_id)
-        if prev is None:
-            last_side[track_id] = side
-            continue
-        if prev != side:
-            if side == inside_side:
-                counts["inside"] += 1
-            else:
-                counts["outside"] += 1
-            last_side[track_id] = side
+        if side == inside_side:
+            inside += 1
+        else:
+            outside += 1
 
-    return {"inside": int(counts["inside"]), "outside": int(counts["outside"])}
+    return {"inside": int(inside), "outside": int(outside)}
 
 
 app = FastAPI(title="MOT Realtime Backend")
@@ -196,8 +216,14 @@ async def track_http(frame: UploadFile):
     try:
         jpeg_bytes = await frame.read()
         frame_bgr = _decode_jpeg(jpeg_bytes)
-        tracker = _load_tracker()
-        detections = tracker.update(frame=frame_bgr, frame_id=1, roi=None)
+
+        tracker = _get_http_tracker()
+        detections: list[dict[str, Any]] = []
+        if tracker is not None:
+            global _http_frame_id
+            _http_frame_id += 1
+            detections = tracker.update(frame=frame_bgr, frame_id=_http_frame_id, roi=None)
+
         annotated = _draw_overlays(frame_bgr, detections=detections, roi=None, line=None)
         out_jpeg = _encode_jpeg(annotated, quality=80)
         # Keep HTTP response compatible with existing UI fallback (base64 JSON)
@@ -208,7 +234,8 @@ async def track_http(frame: UploadFile):
             "count": len(detections),
             "timestamp": int(time.time() * 1000),
             "counts": {"inside": 0, "outside": 0},
-            "tracker_active": True,
+            "tracker_active": tracker is not None,
+            "tracker_error": _http_tracker_error,
         }
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e), "tracker_active": False})
@@ -232,15 +259,13 @@ async def track_ws(ws: WebSocket):
     line_obj: dict | None = None
 
     frame_counter = 0
-    counts = {"inside": 0, "outside": 0}
-    last_side: dict[int, str] = {}
 
     # Backpressure: this endpoint processes frames sequentially; the client should wait for responses.
     # If a client spams frames, we drop them while busy.
     busy = False
 
     async def _handle_frame(frame_bytes: bytes):
-        nonlocal frame_counter, counts, busy
+        nonlocal frame_counter, busy
         busy = True
         try:
             t0 = time.perf_counter()
@@ -264,9 +289,9 @@ async def track_ws(ws: WebSocket):
             t_enc1 = time.perf_counter()
 
             w = annotated.shape[1]
-            line_counts = counts
+            line_counts = {"inside": 0, "outside": 0}
             if line_obj and isinstance(line_obj, dict):
-                line_counts = _update_line_counts(detections, line=line_obj, width=w, counts=counts, last_side=last_side)
+                line_counts = _compute_line_counts(detections, line=line_obj, width=w)
 
             meta = {
                 "type": "result",

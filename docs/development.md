@@ -134,3 +134,28 @@ DETECTOR_BACKEND=triton \
 - Tail logs: `docker logs -f mot-realtime`
 - Recreate a service: `docker compose up -d --no-deps --build mot-realtime`
 - Check env inside a container: `docker exec mot-realtime printenv | sort`
+
+## Self-hosted GPU runner (on-demand)
+
+If you want to run the GPU benchmark workflow on your own machine (laptop/desktop) without keeping it on 24/7, run the GitHub Actions runner only when needed.
+
+Recommended option (runs exactly one job, then exits):
+
+```bash
+RUNNER_DIR=/mnt/Extra/actions-runner ./scripts/run_self_hosted_runner_once.sh
+```
+
+Alternative option (service you can start/stop manually):
+
+```bash
+cd /mnt/Extra/actions-runner
+sudo ./svc.sh install
+sudo ./svc.sh start
+sudo ./svc.sh stop
+sudo ./svc.sh status
+```
+
+Notes:
+
+- The GPU benchmark workflow is manual (`workflow_dispatch`) and includes concurrency so only one GPU bench job runs at a time.
+- Avoid using self-hosted runners for untrusted code (for example, auto-running fork PRs) since the runner has access to your machine.

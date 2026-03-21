@@ -1,0 +1,199 @@
+name: Benchmarks (GPU self-hosted)
+
+on:
+  workflow_dispatch:
+    inputs:
+      model_repo_source:
+        description: "Triton model repo source"
+        required: false
+        default: "local"
+        type: choice
+        options:
+          - local
+          - oci
+      triton_model_repo_ref:
+        description: "OCI ref for Triton model repository (e.g. ghcr.io/org/repo@sha256:...)"
+        required: false
+        type: string
+      frames:
+        description: "Measured frames"
+        required: false
+        default: "200"
+        type: string
+      warmup:
+        description: "Warmup frames (not included in stats)"
+        required: false
+        default: "20"
+        type: string
+      min_fps:
+        description: "Fail the job if FPS drops below this"
+        required: false
+        default: "0.2"
+        type: string
+      max_p95_ms:
+        description: "Fail the job if p95 latency exceeds this (ms)"
+        required: false
+        default: "10000"
+        type: string
+
+concurrency:
+  group: bench-gpu-selfhosted
+  cancel-in-progress: true
+
+jobs:
+  realtime-http-triton:
+    name: Realtime HTTP benchmark (Triton)
+    runs-on: [self-hosted, linux, gpu]
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Host GPU info
+        run: |
+          set -e
+          command -v nvidia-smi
+          nvidia-smi
+
+      - name: Build benchmark image
+        run: |
+          set -e
+          docker compose -f docker/compose.yml build mot-tests
+
+      - name: Ensure local weights present (for tracker + ReID)
+        run: |
+          set -e
+          mkdir -p models
+          docker run --rm \
+            -v "$PWD/models:/app/models" \
+            mot-tests \
+            python scripts/download_models.py --output-dir /app/models --models yolo11 yolo12 osnet
+
+      - name: Start Triton + realtime backend
+        env:
+          DETECTOR_BACKEND: triton
+          TRITON_MODEL_REPO_REF: ${{ inputs.triton_model_repo_ref }}
+        run: |
+          set -e
+          src="${{ inputs.model_repo_source }}"
+          if [ "$src" = "oci" ]; then
+            if [ -z "${TRITON_MODEL_REPO_REF}" ]; then
+              echo "triton_model_repo_ref is required when model_repo_source=oci" >&2
+              exit 2
+            fi
+            docker compose -f docker/compose.yml -f docker/compose.gpu.yml --profile triton up -d --build triton mot-realtime
+          else
+            if [ ! -d models_repo ]; then
+              echo "models_repo/ not found in workspace; cannot use local model repo" >&2
+              exit 2
+            fi
+            docker compose -f docker/compose.yml -f docker/compose.gpu.yml -f docker/compose.triton.localrepo.yml --profile triton up -d --build triton mot-realtime
+          fi
+
+      - name: Wait for Triton readiness
+        run: |
+          set -e
+          for i in $(seq 1 60); do
+            if docker exec mot-triton python3 -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/v2/health/ready').read()" >/dev/null 2>&1; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Triton readiness timed out" >&2
+          docker logs --tail 200 mot-triton || true
+          exit 1
+
+      - name: Wait for realtime backend health
+        run: |
+          set -e
+          for i in $(seq 1 60); do
+            if docker exec mot-realtime python -c "import urllib.request; urllib.request.urlopen('http://localhost:5001/health').read()" >/dev/null 2>&1; then
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "mot-realtime health timed out" >&2
+          docker logs --tail 200 mot-realtime || true
+          exit 1
+
+      - name: Run benchmark + capture nvidia-smi
+        env:
+          FRAMES: ${{ inputs.frames }}
+          WARMUP: ${{ inputs.warmup }}
+        run: |
+          set -e
+          rm -f nvidia_smi_samples.csv benchmark_realtime_http_gpu.json
+
+          (
+            while true; do
+              nvidia-smi --query-gpu=timestamp,index,utilization.gpu,memory.used,memory.total --format=csv,noheader,nounits || true
+              sleep 1
+            done
+          ) > nvidia_smi_samples.csv &
+          SMI_PID=$!
+          trap 'kill $SMI_PID 2>/dev/null || true' EXIT
+
+          docker run --rm --network container:mot-realtime mot-tests \
+            python scripts/benchmark_realtime.py \
+              --base-url http://127.0.0.1:5001 \
+              --endpoint /realtime/track \
+              --frames "$FRAMES" \
+              --warmup "$WARMUP" \
+              --out - \
+            > benchmark_realtime_http_gpu.json
+
+          kill $SMI_PID 2>/dev/null || true
+
+      - name: Enforce loose thresholds
+        env:
+          MIN_FPS: ${{ inputs.min_fps }}
+          MAX_P95_MS: ${{ inputs.max_p95_ms }}
+        run: |
+          set -e
+          python - <<'PY'
+          import json, os
+          min_fps = float(os.environ.get('MIN_FPS', '0'))
+          max_p95 = float(os.environ.get('MAX_P95_MS', '1e18'))
+          with open('benchmark_realtime_http_gpu.json', 'r', encoding='utf-8') as f:
+            payload = json.load(f)
+          fps = float(payload.get('fps', 0.0))
+          p95 = float(payload.get('latency_ms', {}).get('p95', 0.0))
+          print(f"fps={fps:.3f} p95_ms={p95:.1f} thresholds: min_fps={min_fps} max_p95_ms={max_p95}")
+          if fps < min_fps:
+            raise SystemExit(f"FAIL: fps {fps:.3f} < {min_fps}")
+          if p95 > max_p95:
+            raise SystemExit(f"FAIL: p95 {p95:.1f}ms > {max_p95}ms")
+          print('PASS')
+          PY
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-realtime-http-gpu
+          if-no-files-found: warn
+          path: |
+            benchmark_realtime_http_gpu.json
+            nvidia_smi_samples.csv
+
+      - name: Upload logs on failure
+        if: failure()
+        run: |
+          set -e
+          docker logs --tail 200 mot-triton > mot-triton.log 2>&1 || true
+          docker logs --tail 200 mot-realtime > mot-realtime.log 2>&1 || true
+
+      - name: Upload logs artifact
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-realtime-http-gpu-logs
+          if-no-files-found: warn
+          path: |
+            mot-triton.log
+            mot-realtime.log
+
+      - name: Teardown
+        if: always()
+        run: docker compose -f docker/compose.yml -f docker/compose.gpu.yml --profile triton down -v

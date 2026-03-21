@@ -1,0 +1,13 @@
+# Local Triton model repository override
+#
+# Use this when you want Triton to load models directly from the checked-in
+# ./models_repo directory (instead of pulling an OCI artifact via ORAS).
+#
+# Usage:
+#   DETECTOR_BACKEND=triton \
+#   docker compose -f docker/compose.yml -f docker/compose.gpu.yml -f docker/compose.triton.localrepo.yml --profile triton up -d --build
+
+services:
+  triton:
+    volumes:
+      - ../models_repo:/models:ro
