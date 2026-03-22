@@ -118,6 +118,8 @@ jobs:
           release_tag="model-bundle-${ver}"
 
           python3 scripts/github_release_upload.py \
+            --upload-timeout-seconds 3600 \
+            --upload-retries 5 \
             --tag "$release_tag" \
             --name "Triton model bundle ${ver}" \
             --notes "OCI ref: ${{ inputs.oci_ref }}" \
