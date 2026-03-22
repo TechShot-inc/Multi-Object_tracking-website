@@ -35,6 +35,12 @@ import urllib.request
 from pathlib import Path
 
 
+class GitHubAPIError(RuntimeError):
+    def __init__(self, code: int, message: str):
+        super().__init__(message)
+        self.code = code
+
+
 def _api_request(url: str, *, method: str, token: str, data: dict | None = None, content_type: str | None = None):
     headers = {
         "Accept": "application/vnd.github+json",
@@ -54,7 +60,8 @@ def _api_request(url: str, *, method: str, token: str, data: dict | None = None,
             return resp.status, resp.headers, raw
     except urllib.error.HTTPError as e:
         raw = e.read()
-        raise SystemExit(f"GitHub API error {e.code}: {raw[:2000].decode('utf-8', errors='ignore')}")
+        msg = raw[:2000].decode("utf-8", errors="ignore")
+        raise GitHubAPIError(e.code, f"GitHub API error {e.code}: {msg}")
 
 
 def _upload_asset(
@@ -117,6 +124,13 @@ def _upload_asset(
             if resp.status in (200, 201):
                 return
 
+            if resp.status == 422:
+                detail = body[:2000].decode("utf-8", errors="ignore")
+                # Common on reruns: asset with same name already exists.
+                if "already_exists" in detail or "already exists" in detail:
+                    print(f"Asset already exists; skipping: {file_path}")
+                    return
+
             detail = body[:2000].decode("utf-8", errors="ignore")
             raise SystemExit(f"Asset upload failed: {file_path} status={resp.status}: {detail}")
         except (TimeoutError, socket.timeout, OSError) as e:
@@ -168,15 +182,27 @@ def main() -> None:
         "prerelease": bool(args.prerelease),
     }
 
-    status, _headers, raw = _api_request(create_url, method="POST", token=token, data=payload)
-    if status not in (200, 201):
-        raise SystemExit(f"Release creation failed (status={status})")
+    try:
+        status, _headers, raw = _api_request(create_url, method="POST", token=token, data=payload)
+        if status not in (200, 201):
+            raise SystemExit(f"Release creation failed (status={status})")
+        resp = json.loads(raw.decode("utf-8"))
+    except GitHubAPIError as e:
+        # Common on reruns: tag already exists -> reuse release.
+        if e.code == 422 and ("already_exists" in str(e) or "already exists" in str(e) or "Validation Failed" in str(e)):
+            get_url = f"https://api.github.com/repos/{owner}/{name}/releases/tags/{urllib.parse.quote(args.tag)}"
+            status, _headers, raw = _api_request(get_url, method="GET", token=token)
+            if status != 200:
+                raise SystemExit(f"Release exists but lookup failed (status={status}): {e}")
+            resp = json.loads(raw.decode("utf-8"))
+            print(f"Release tag already exists; reusing: {args.tag}")
+        else:
+            raise SystemExit(str(e))
 
-    resp = json.loads(raw.decode("utf-8"))
     upload_url = resp.get("upload_url")
     html_url = resp.get("html_url")
     if not upload_url:
-        raise SystemExit("Release created but upload_url missing")
+        raise SystemExit("Release is missing upload_url")
 
     assets = [Path(p) for p in args.asset]
     for p in assets:
