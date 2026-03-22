@@ -22,10 +22,13 @@ Notes:
 from __future__ import annotations
 
 import argparse
+import http.client
 import json
 import mimetypes
 import os
+import socket
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -54,7 +57,15 @@ def _api_request(url: str, *, method: str, token: str, data: dict | None = None,
         raise SystemExit(f"GitHub API error {e.code}: {raw[:2000].decode('utf-8', errors='ignore')}")
 
 
-def _upload_asset(upload_url_template: str, *, token: str, file_path: Path) -> None:
+def _upload_asset(
+    upload_url_template: str,
+    *,
+    token: str,
+    file_path: Path,
+    timeout_seconds: int,
+    retries: int,
+    chunk_size_bytes: int,
+) -> None:
     # upload_url is like: https://uploads.github.com/repos/{owner}/{repo}/releases/{id}/assets{?name,label}
     upload_url = upload_url_template.split("{", 1)[0]
     q = urllib.parse.urlencode({"name": file_path.name})
@@ -72,18 +83,57 @@ def _upload_asset(upload_url_template: str, *, token: str, file_path: Path) -> N
         "X-GitHub-Api-Version": "2022-11-28",
     }
 
-    data = file_path.read_bytes()
-    req = urllib.request.Request(upload_url, data=data, headers=headers, method="POST")
-    try:
-        with urllib.request.urlopen(req, timeout=120) as resp:
-            _ = resp.read()
-            if resp.status not in (200, 201):
-                raise SystemExit(f"Asset upload failed: {file_path} status={resp.status}")
-    except urllib.error.HTTPError as e:
-        raw = e.read()
-        raise SystemExit(
-            f"Asset upload failed: {file_path} status={e.code}: {raw[:2000].decode('utf-8', errors='ignore')}"
-        )
+    parts = urllib.parse.urlsplit(upload_url)
+    if parts.scheme != "https":
+        raise SystemExit(f"Asset upload URL must be https (got {parts.scheme}): {upload_url}")
+
+    path = parts.path
+    if parts.query:
+        path = f"{path}?{parts.query}"
+
+    total_size = file_path.stat().st_size
+    headers_with_length = dict(headers)
+    headers_with_length["Content-Length"] = str(total_size)
+
+    last_error: Exception | None = None
+    for attempt in range(1, max(1, retries) + 1):
+        conn: http.client.HTTPSConnection | None = None
+        try:
+            conn = http.client.HTTPSConnection(parts.netloc, timeout=timeout_seconds)
+            conn.putrequest("POST", path)
+            for k, v in headers_with_length.items():
+                conn.putheader(k, v)
+            conn.endheaders()
+
+            with file_path.open("rb") as f:
+                while True:
+                    chunk = f.read(chunk_size_bytes)
+                    if not chunk:
+                        break
+                    conn.send(chunk)
+
+            resp = conn.getresponse()
+            body = resp.read()
+            if resp.status in (200, 201):
+                return
+
+            detail = body[:2000].decode("utf-8", errors="ignore")
+            raise SystemExit(f"Asset upload failed: {file_path} status={resp.status}: {detail}")
+        except (TimeoutError, socket.timeout, OSError) as e:
+            last_error = e
+            if attempt >= retries:
+                break
+            wait_seconds = min(60, 2**attempt)
+            print(f"Upload attempt {attempt} failed ({type(e).__name__}: {e}); retrying in {wait_seconds}s...", file=sys.stderr)
+            time.sleep(wait_seconds)
+        finally:
+            if conn is not None:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+
+    raise SystemExit(f"Asset upload failed after {retries} attempts: {file_path}: {last_error}")
 
 
 def main() -> None:
@@ -95,6 +145,8 @@ def main() -> None:
     ap.add_argument("--prerelease", action="store_true")
     ap.add_argument("--draft", action="store_true")
     ap.add_argument("--asset", action="append", default=[])
+    ap.add_argument("--upload-timeout-seconds", type=int, default=1800)
+    ap.add_argument("--upload-retries", type=int, default=3)
     args = ap.parse_args()
 
     token = os.environ.get("GITHUB_TOKEN", "").strip()
@@ -133,7 +185,14 @@ def main() -> None:
 
     for p in assets:
         print(f"Uploading asset: {p}")
-        _upload_asset(upload_url, token=token, file_path=p)
+        _upload_asset(
+            upload_url,
+            token=token,
+            file_path=p,
+            timeout_seconds=max(30, int(args.upload_timeout_seconds)),
+            retries=max(1, int(args.upload_retries)),
+            chunk_size_bytes=8 * 1024 * 1024,
+        )
 
     print(f"Release ready: {html_url}")
 
