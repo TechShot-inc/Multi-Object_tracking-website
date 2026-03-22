@@ -26,6 +26,12 @@ if [[ -z "${REF}" ]]; then
   exit 2
 fi
 
+if [[ "${REF}" == *"@sha256:"* ]]; then
+  echo "ERROR: OCI ref must be a tag when pushing (got a digest ref): ${REF}" >&2
+  echo "Hint: use something like ghcr.io/<org>/<name>:<version>; the digest is produced by the push." >&2
+  exit 2
+fi
+
 if [[ ! -d "${MODEL_REPO_DIR}" ]]; then
   echo "ERROR: model repo dir not found: ${MODEL_REPO_DIR}"
   exit 2
@@ -100,9 +106,15 @@ fi
 
 oras_push() {
   if [[ "${ORAS_BIN}" == "docker-run-oras" ]]; then
+    DOCKER_AUTH_MOUNT=()
+    if [[ -d "${HOME:-}/.docker" ]]; then
+      # Reuse `docker login` credentials (GitHub Actions writes to $HOME/.docker/config.json).
+      DOCKER_AUTH_MOUNT=( -v "${HOME}/.docker:/root/.docker:ro" )
+    fi
     docker run --rm \
       -v "${TMPDIR}:/work" \
       -w /work \
+      "${DOCKER_AUTH_MOUNT[@]}" \
       "${ORAS_IMAGE}" push \
       ${PLAIN_HTTP} \
       --artifact-type application/vnd.mot.triton.modelrepo.v1+tgz \
@@ -118,12 +130,6 @@ oras_push() {
 }
 
 oras_push
-
-(cd "${TMPDIR}" && oras push \
-  ${PLAIN_HTTP} \
-  --artifact-type application/vnd.mot.triton.modelrepo.v1+tgz \
-  "${REF}" \
-  "${ARCHIVE_NAME}":application/vnd.oci.image.layer.v1.tar+gzip)
 
 echo "Done. Configure deployment with:"
 echo "  TRITON_MODEL_REPO_REF=${REF}"
