@@ -95,16 +95,17 @@ Checklist
 Goal: models are versioned, reproducible, and documented.
 
 Checklist
-- [ ] Add a model manifest (single source of truth): models, versions, SHA256, license
-- [ ] Populate SHA256 checksums for downloaded weights (existing helpers in `scripts/download_models.py`)
-- [ ] Version the model bundle separately from app version
-- [ ] Automate release publishing:
-  - [ ] PT → ONNX export
-  - [ ] ONNX → Triton model repo
-  - [ ] Publish OCI artifact (GHCR) + print digest ref
-  - [ ] Attach checksums to GH Release
-- [ ] Add a short model card:
-  - [ ] data (high level), intended use, limits, privacy notes, license
+- [x] Add a model manifest (single source of truth): models, versions, SHA256, license
+- [x] Populate SHA256 checksums for published Triton model bundles (manifest + SHA256SUMS)
+- [x] Version the model bundle separately from app version (publish workflow uses tag/versioned OCI refs)
+- [x] Automate release publishing (self-hosted runner):
+  - [x] Publish OCI artifact (GHCR) + print digest ref
+  - [x] Attach checksums to GitHub Release (optional step in workflow)
+- [x] Add a short model card:
+  - [x] data (high level), intended use, limits, privacy notes, license
+
+Notes:
+- PT→ONNX export and ONNX→Triton repo creation are supported via scripts, but the automated publish workflow assumes you already have a model repo directory on the runner host.
 
 ---
 

@@ -3,6 +3,9 @@ name: Secret Scan (Full Git History)
 on:
   workflow_dispatch:
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 jobs:
   gitleaks-history:
     name: Gitleaks history scan (Docker)

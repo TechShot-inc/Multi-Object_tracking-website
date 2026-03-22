@@ -1,0 +1,128 @@
+name: Publish Triton Model Bundle (OCI)
+
+on:
+  workflow_dispatch:
+    inputs:
+      model_repo_dir:
+        description: "Host path to Triton model repo directory (contains yolo11/, yolo12/, etc.)"
+        required: false
+        default: "/mnt/Extra/mot-triton-model-repo"
+        type: string
+      oci_ref:
+        description: "OCI ref to push to (tag recommended): ghcr.io/<org>/<name>:<version>"
+        required: true
+        type: string
+      create_github_release:
+        description: "Also create a GitHub Release with checksums + manifest assets"
+        required: false
+        default: "true"
+        type: choice
+        options:
+          - "true"
+          - "false"
+      release_target:
+        description: "target_commitish for the GitHub Release tag (branch or SHA)"
+        required: false
+        default: "main"
+        type: string
+
+concurrency:
+  group: publish-triton-model-bundle
+  cancel-in-progress: false
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  publish:
+    name: Publish model bundle
+    runs-on: [self-hosted, linux, gpu]
+    timeout-minutes: 30
+
+    permissions:
+      contents: write
+      packages: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify model repo dir
+        env:
+          MODEL_REPO_DIR: ${{ inputs.model_repo_dir }}
+        run: |
+          set -e
+          if [ -z "$MODEL_REPO_DIR" ]; then
+            echo "model_repo_dir is required" >&2
+            exit 2
+          fi
+          if [ ! -d "$MODEL_REPO_DIR" ]; then
+            echo "Model repo dir not found: $MODEL_REPO_DIR" >&2
+            exit 2
+          fi
+          if [ ! -d "$MODEL_REPO_DIR/yolo11" ] || [ ! -d "$MODEL_REPO_DIR/yolo12" ]; then
+            echo "Model repo dir must contain yolo11/ and yolo12/" >&2
+            echo "Got contents:" >&2
+            ls -la "$MODEL_REPO_DIR" || true
+            exit 2
+          fi
+
+      - name: Log in to GHCR
+        env:
+          CR_PAT: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          echo "$CR_PAT" | docker login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin
+
+      - name: Build bundle + push to OCI
+        env:
+          OUT_DIR: var/model_bundle
+          ORAS_PLAIN_HTTP: "0"
+        run: |
+          set -e
+          rm -rf var/model_bundle
+          mkdir -p var/model_bundle
+
+          # The script will generate:
+          # - var/model_bundle/triton-models.tar.gz
+          # - var/model_bundle/triton-models.tar.gz.sha256
+          # - var/model_bundle/model_repo_manifest.json
+          # - var/model_bundle/model_repo.SHA256SUMS
+          bash scripts/publish_triton_model_repo_oci.sh "${{ inputs.oci_ref }}" "${{ inputs.model_repo_dir }}"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: triton-model-bundle
+          if-no-files-found: error
+          path: |
+            var/model_bundle/triton-models.tar.gz
+            var/model_bundle/triton-models.tar.gz.sha256
+            var/model_bundle/model_repo_manifest.json
+            var/model_bundle/model_repo.SHA256SUMS
+
+      - name: Create GitHub Release
+        if: ${{ inputs.create_github_release == 'true' }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          set -e
+          tag="${{ inputs.oci_ref }}"
+          # Make a safe release tag name from the OCI ref.
+          # Example: ghcr.io/org/name:ver -> model-bundle-ver
+          ver=$(echo "$tag" | sed -n 's/.*:\(.*\)$/\1/p')
+          if [ -z "$ver" ]; then
+            ver=$(date +%Y%m%d-%H%M%S)
+          fi
+          release_tag="model-bundle-${ver}"
+
+          python3 scripts/github_release_upload.py \
+            --tag "$release_tag" \
+            --name "Triton model bundle ${ver}" \
+            --notes "OCI ref: ${{ inputs.oci_ref }}" \
+            --target "${{ inputs.release_target }}" \
+            --asset var/model_bundle/triton-models.tar.gz \
+            --asset var/model_bundle/triton-models.tar.gz.sha256 \
+            --asset var/model_bundle/model_repo_manifest.json \
+            --asset var/model_bundle/model_repo.SHA256SUMS

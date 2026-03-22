@@ -3,6 +3,9 @@ name: Benchmarks (Docker)
 on:
   workflow_dispatch:
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 jobs:
   realtime-http-smoke:
     name: Realtime HTTP benchmark smoke
