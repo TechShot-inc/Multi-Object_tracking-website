@@ -1,0 +1,11 @@
+apiVersion: 1
+
+dashboards:
+  - name: mot
+    orgId: 1
+    folder: "MOT"
+    type: file
+    disableDeletion: true
+    editable: true
+    options:
+      path: /etc/grafana/dashboards

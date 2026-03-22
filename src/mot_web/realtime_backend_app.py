@@ -10,6 +10,15 @@ from fastapi import FastAPI, UploadFile
 from fastapi.responses import JSONResponse
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
+from mot_web.metrics import (
+    REALTIME_FRAMES_TOTAL,
+    REALTIME_FRAME_TOTAL_DURATION_SECONDS,
+    WS_CONNECTIONS_ACTIVE,
+    WS_ERRORS_TOTAL,
+    WS_MESSAGES_TOTAL,
+    install_metrics,
+)
+
 
 def _default_model_paths() -> dict[str, str]:
     project_root = os.getenv("PROJECT_ROOT", os.getcwd())
@@ -205,6 +214,8 @@ def _compute_line_counts(
 
 app = FastAPI(title="MOT Realtime Backend")
 
+install_metrics(app, service="mot-realtime")
+
 
 @app.get("/health")
 def health():
@@ -244,6 +255,8 @@ async def track_http(frame: UploadFile):
 @app.websocket("/realtime/ws")
 async def track_ws(ws: WebSocket):
     await ws.accept()
+
+    WS_CONNECTIONS_ACTIVE.labels(service="mot-realtime").inc()
 
     # One tracker per websocket connection (correct isolation, per plan.md)
     try:
@@ -316,12 +329,20 @@ async def track_ws(ws: WebSocket):
             # Send small JSON metadata then binary annotated JPEG
             await ws.send_text(json.dumps(meta))
             await ws.send_bytes(out)
+
+            REALTIME_FRAMES_TOTAL.labels(service="mot-realtime").inc()
+            REALTIME_FRAME_TOTAL_DURATION_SECONDS.labels(service="mot-realtime").observe(time.perf_counter() - t0)
         finally:
             busy = False
 
     try:
         while True:
             message = await ws.receive()
+            WS_MESSAGES_TOTAL.labels(
+                service="mot-realtime",
+                direction="in",
+                type=str(message.get("type") or "unknown"),
+            ).inc()
             if message.get("type") == "websocket.disconnect":
                 break
 
@@ -350,8 +371,14 @@ async def track_ws(ws: WebSocket):
     except WebSocketDisconnect:
         return
     except Exception as e:
+        WS_ERRORS_TOTAL.labels(service="mot-realtime").inc()
         try:
             await ws.send_text(json.dumps({"type": "error", "error": str(e)}))
         except Exception:
             pass
         return
+    finally:
+        try:
+            WS_CONNECTIONS_ACTIVE.labels(service="mot-realtime").dec()
+        except Exception:
+            pass

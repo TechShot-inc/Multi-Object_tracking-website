@@ -13,6 +13,7 @@ from .web.routes.index import router as index_router
 from .web.routes.health import router as health_router
 from .web.routes.video import router as video_router
 from .web.routes.realtime import router as realtime_router
+from .metrics import install_metrics
 
 
 class _NoCacheStaticFiles(StaticFiles):
@@ -27,6 +28,8 @@ def create_app() -> FastAPI:
     settings = load_settings()
 
     app = FastAPI(title="MOT Web")
+
+    install_metrics(app, service="mot-web")
 
     # Ensure runtime dirs exist
     settings.upload_dir.mkdir(parents=True, exist_ok=True)

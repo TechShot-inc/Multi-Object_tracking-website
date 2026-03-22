@@ -1,0 +1,29 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: mot-web
+    metrics_path: /metrics
+    static_configs:
+      - targets:
+          - mot-web-dev:5000
+          - mot-web-prod:5000
+
+  - job_name: mot-realtime
+    metrics_path: /metrics
+    static_configs:
+      - targets:
+          - mot-realtime:5001
+
+  - job_name: mot-worker
+    metrics_path: /metrics
+    static_configs:
+      - targets:
+          - mot-worker:9101
+
+  - job_name: triton
+    metrics_path: /metrics
+    static_configs:
+      - targets:
+          - triton:8002

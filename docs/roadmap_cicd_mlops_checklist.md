@@ -114,16 +114,16 @@ Notes:
 Goal: visibility into FPS/latency/errors, queue depth, Triton health, GPU usage.
 
 Checklist
-- [ ] Add `/metrics` endpoints (Prometheus):
-  - [ ] realtime backend: frame timings, fps, WS errors
-  - [ ] worker: job durations, failures, queue depth
-  - [ ] web: request durations/errors
-- [ ] Add monitoring compose profile:
-  - [ ] Prometheus service + config
-  - [ ] Grafana service + provisioning
-  - [ ] scrape Triton metrics (port 8002)
+- [x] Add `/metrics` endpoints (Prometheus):
+  - [x] realtime backend: frames + WS errors (FPS derivable from frame rate)
+  - [x] worker: job durations, failures, queue depth
+  - [x] web: request durations/errors
+- [x] Add monitoring compose profile:
+  - [x] Prometheus service + config
+  - [x] Grafana service + provisioning
+  - [x] scrape Triton metrics (port 8002)
   - [ ] (Optional) redis exporter + DCGM GPU exporter
-- [ ] Provide starter Grafana dashboards (checked into repo)
+- [x] Provide starter Grafana dashboards (checked into repo)
 
 ---
 

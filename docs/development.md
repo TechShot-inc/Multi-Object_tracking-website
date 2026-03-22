@@ -73,6 +73,28 @@ Notes:
 - `mot-web-dev` proxies `/realtime/ws` to `mot-realtime` when `REALTIME_BACKEND_WS` is set (Compose does this).
 - When using Triton, realtime should rely on Triton for GPU inference; the `mot-realtime` container is intentionally configured to avoid stealing VRAM.
 
+## Monitoring (Phase 5)
+
+This repo includes a Docker Compose `monitoring` profile with Prometheus + Grafana.
+
+Start monitoring stack:
+
+```bash
+docker compose -f docker/compose.yml --profile monitoring up -d
+```
+
+Open:
+
+- Grafana: `http://localhost:3000` (default: `admin` / `admin`)
+- Prometheus: `http://localhost:9090`
+
+Metrics endpoints (inside the compose network):
+
+- Web: `http://mot-web-dev:5000/metrics` (or `mot-web-prod:5000` when using `--profile prod`)
+- Realtime backend: `http://mot-realtime:5001/metrics`
+- Worker: `http://mot-worker:9101/metrics`
+- Triton: `http://triton:8002/metrics`
+
 ## Common development loops
 
 ### Frontend iteration (JS/CSS)
