@@ -71,6 +71,72 @@ const clearLineButton = document.getElementById('clear-line');
 const personsInsideSpan = document.getElementById('persons-inside');
 const personsOutsideSpan = document.getElementById('persons-outside');
 
+// Phase 6: realtime stats strip + inline error UX
+const statFpsEl = document.getElementById('rt-stat-fps');
+const statLatencyEl = document.getElementById('rt-stat-latency');
+const statObjectsEl = document.getElementById('rt-stat-objects');
+
+const errorPanelEl = document.getElementById('realtime-error');
+const errorKindEl = document.getElementById('realtime-error-kind');
+const errorMessageEl = document.getElementById('realtime-error-message');
+
+let _rtLastLatencyMs = null;
+let _rtLastObjects = null;
+let _rtFrameTimes = [];
+
+function _rtSetStatText(el, value) {
+    if (!el) return;
+    el.textContent = (value === null || value === undefined || value === '') ? '-' : String(value);
+}
+
+function _rtUpdateStatsUI() {
+    // FPS from sliding window of successful renders
+    let fpsText = '-';
+    if (_rtFrameTimes.length >= 2) {
+        const dtMs = _rtFrameTimes[_rtFrameTimes.length - 1] - _rtFrameTimes[0];
+        if (dtMs > 0) {
+            const fps = ((_rtFrameTimes.length - 1) * 1000) / dtMs;
+            fpsText = fps.toFixed(1);
+        }
+    }
+
+    _rtSetStatText(statFpsEl, fpsText);
+    _rtSetStatText(statObjectsEl, (_rtLastObjects === null ? '-' : _rtLastObjects));
+    _rtSetStatText(statLatencyEl, (_rtLastLatencyMs === null ? '-' : `${_rtLastLatencyMs} ms`));
+}
+
+function _rtRecordRenderedFrame() {
+    const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+    _rtFrameTimes.push(now);
+    // Keep ~2 seconds of history at typical FPS
+    while (_rtFrameTimes.length > 30) _rtFrameTimes.shift();
+    _rtUpdateStatsUI();
+}
+
+function _rtClearStats() {
+    _rtLastLatencyMs = null;
+    _rtLastObjects = null;
+    _rtFrameTimes = [];
+    _rtUpdateStatsUI();
+}
+
+function _rtSetError(kind, message) {
+    if (!errorPanelEl || !errorKindEl || !errorMessageEl) return;
+    const k = (kind || 'Error').trim();
+    const msg = (message || '').trim();
+    if (!msg) return;
+    errorKindEl.textContent = k;
+    errorMessageEl.textContent = msg;
+    errorPanelEl.classList.remove('hidden');
+}
+
+function _rtClearError() {
+    if (!errorPanelEl) return;
+    errorPanelEl.classList.add('hidden');
+    if (errorKindEl) errorKindEl.textContent = 'Error';
+    if (errorMessageEl) errorMessageEl.textContent = '';
+}
+
 function resetCountersUI() {
     personsInsideSpan.textContent = '0';
     personsOutsideSpan.textContent = '0';
@@ -81,6 +147,8 @@ function initializeWebcam() {
     resetRoiState();
     resetLineState();
     resizeCanvases();
+    _rtClearError();
+    _rtClearStats();
     document.getElementById('realtime-status').querySelector('.status-message').textContent = 'Ready to start tracking';
     // Set up line position radio buttons
     document.querySelectorAll('input[name="line-position"]').forEach(radio => {
@@ -96,6 +164,8 @@ function startTracking() {
     dlog('Starting tracking');
     document.getElementById('start-tracking').disabled = true;
     document.getElementById('realtime-status').querySelector('.status-message').textContent = 'Starting camera...';
+    _rtClearError();
+    _rtClearStats();
     roiCanvasRealtime.style.pointerEvents = 'none';
 
     // Camera access requires a secure context in most browsers. HTTP is allowed for localhost
@@ -106,6 +176,7 @@ function startTracking() {
         console.error('Insecure context for camera:', window.location.origin);
         document.getElementById('start-tracking').disabled = false;
         document.getElementById('realtime-status').querySelector('.status-message').textContent = 'Camera requires HTTPS or localhost';
+        _rtSetError('Camera', 'Camera requires HTTPS or localhost');
         showModal(
             'Camera access is blocked on insecure origins. Open this page via https://, or use http://localhost:5000 instead of ' +
                 window.location.origin
@@ -117,6 +188,7 @@ function startTracking() {
         console.error('Webcam access not supported');
         document.getElementById('start-tracking').disabled = false;
         document.getElementById('realtime-status').querySelector('.status-message').textContent = 'Webcam access not supported';
+        _rtSetError('Camera', 'Webcam access not supported');
         showModal('Webcam access not supported in this browser.');
         return;
     }
@@ -150,6 +222,7 @@ function startTracking() {
                 console.error('Video play error:', err);
                 document.getElementById('start-tracking').disabled = false;
                 document.getElementById('realtime-status').querySelector('.status-message').textContent = 'Error playing video';
+                _rtSetError('Camera', (err && (err.message || err.name)) ? (err.message || err.name) : String(err));
                 showModal('Error playing webcam video: ' + err.message);
                 stopTracking();
             });
@@ -159,6 +232,7 @@ function startTracking() {
         document.getElementById('start-tracking').disabled = false;
         document.getElementById('realtime-status').querySelector('.status-message').textContent = 'Error accessing webcam';
         const msg = (err && (err.message || err.name)) ? (err.message || err.name) : String(err);
+        _rtSetError('Camera', msg);
         showModal('Error accessing webcam: ' + msg);
     });
 }
@@ -170,6 +244,8 @@ function stopTracking() {
     document.getElementById('stop-tracking').disabled = true;
     document.getElementById('realtime-loading').classList.add('hidden');
     document.getElementById('realtime-status').querySelector('.status-message').textContent = 'Ready to start tracking';
+    _rtClearError();
+    _rtClearStats();
     
     if (videoStream) {
         videoStream.getTracks().forEach(track => track.stop());
@@ -452,6 +528,19 @@ function processFrames(timestamp) {
                     personsOutsideSpan.textContent = meta.counts.outside ?? 0;
                 }
 
+                // Update stats strip (object count + server latency)
+                if (meta && (meta.count === 0 || meta.count)) {
+                    _rtLastObjects = meta.count;
+                }
+                if (meta && meta.timing_ms && (meta.timing_ms.total === 0 || meta.timing_ms.total)) {
+                    _rtLastLatencyMs = meta.timing_ms.total;
+                } else {
+                    _rtLastLatencyMs = null;
+                }
+                if (meta && meta.tracker_active === false && meta.tracker_error) {
+                    _rtSetError('Tracker init', meta.tracker_error);
+                }
+
                 // Surface whether the real BoostTrack+YOLO tracker is running.
                 // Important: do not let a *past* stub-mode error stick forever.
                 const statusEl = document.getElementById('realtime-status').querySelector('.status-message');
@@ -479,6 +568,7 @@ function processFrames(timestamp) {
                     trackingCtx.clearRect(0, 0, trackingCanvas.width, trackingCanvas.height);
                     trackingCtx.drawImage(img, 0, 0, trackingCanvas.width, trackingCanvas.height);
                     trackingCanvas.style.visibility = 'visible';
+                    _rtRecordRenderedFrame();
                     dlog('Rendered annotated frame, object count:', (meta && meta.count) || 0);
                     if (isTracking) {
                         requestAnimationFrame(processFrames);
@@ -502,6 +592,7 @@ function processFrames(timestamp) {
                         trackingCtx.drawImage(img, 0, 0, trackingCanvas.width, trackingCanvas.height);
                         trackingCanvas.style.visibility = 'visible';
                         URL.revokeObjectURL(url);
+                        _rtRecordRenderedFrame();
                         dlog('Rendered annotated frame (binary), object count:', (meta && meta.count) || 0);
                         if (isTracking) {
                             requestAnimationFrame(processFrames);
@@ -525,10 +616,11 @@ function processFrames(timestamp) {
                     lastConfigKey = null;
                     document.getElementById('realtime-status').querySelector('.status-message').textContent = 'WebSocket slow; using HTTP fallback...';
                     document.getElementById('realtime-loading').classList.add('hidden');
+                    _rtSetError('WebSocket timeout', 'WebSocket was slow; switched to HTTP fallback');
                 } else {
                     document.getElementById('realtime-loading').classList.remove('hidden');
                     document.getElementById('realtime-status').querySelector('.status-message').textContent = 'Tracking error';
-                    showModal('Tracking error: ' + error.message);
+                    _rtSetError('Backend', (error && error.message) ? error.message : String(error));
                 }
                 if (isTracking) {
                     setTimeout(() => requestAnimationFrame(processFrames), FRAME_INTERVAL);
@@ -539,7 +631,7 @@ function processFrames(timestamp) {
         console.error('Error capturing frame:', error);
         document.getElementById('realtime-loading').classList.remove('hidden');
         document.getElementById('realtime-status').querySelector('.status-message').textContent = 'Error capturing frame';
-        showModal('Error capturing frame: ' + error.message);
+        _rtSetError('Capture', (error && error.message) ? error.message : String(error));
         if (isTracking) {
             setTimeout(() => requestAnimationFrame(processFrames), FRAME_INTERVAL);
         }

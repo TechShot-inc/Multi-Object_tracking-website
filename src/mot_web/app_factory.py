@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+import importlib.metadata
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -43,6 +45,17 @@ def create_app() -> FastAPI:
     templates_dir = package_root / "web" / "templates"
     static_dir = package_root / "web" / "static"
     app.state.templates = Jinja2Templates(directory=str(templates_dir))
+
+    static_version = os.getenv("STATIC_VERSION", "").strip() or os.getenv("GITHUB_SHA", "").strip()
+    if static_version:
+        static_version = static_version[:12]
+    else:
+        try:
+            static_version = importlib.metadata.version("mot-web")
+        except Exception:
+            static_version = "dev"
+    app.state.templates.env.globals["static_version"] = static_version
+
     static_cls = _NoCacheStaticFiles if settings.environment == "dev" else StaticFiles
     app.mount("/static", static_cls(directory=str(static_dir)), name="static")
 
