@@ -104,6 +104,13 @@ jobs:
             docker compose -f docker/compose.yml -f docker/compose.gpu.yml -f docker/compose.triton.localrepo.yml --profile triton up -d --build triton mot-realtime
           fi
 
+          # Remember which compose files were used (for consistent teardown)
+          if [ "$src" = "oci" ]; then
+            echo "COMPOSE_FILES=-f docker/compose.yml -f docker/compose.gpu.yml" >> "$GITHUB_ENV"
+          else
+            echo "COMPOSE_FILES=-f docker/compose.yml -f docker/compose.gpu.yml -f docker/compose.triton.localrepo.yml" >> "$GITHUB_ENV"
+          fi
+
       - name: Wait for Triton readiness
         run: |
           set -e
@@ -209,4 +216,4 @@ jobs:
 
       - name: Teardown
         if: always()
-        run: docker compose -f docker/compose.yml -f docker/compose.gpu.yml --profile triton down -v
+        run: docker compose $COMPOSE_FILES --profile triton down -v
