@@ -83,10 +83,17 @@ Start monitoring stack:
 docker compose -f docker/compose.yml --profile monitoring up -d
 ```
 
+If you already have something using `3000` or `9090` on your host, override the published ports:
+
+```bash
+GRAFANA_PORT=3001 PROMETHEUS_PORT=9091 \
+  docker compose -f docker/compose.yml --profile monitoring up -d
+```
+
 Open:
 
-- Grafana: `http://localhost:3000` (default: `admin` / `admin`)
-- Prometheus: `http://localhost:9090`
+- Grafana: `http://localhost:${GRAFANA_PORT:-3000}` (default: `admin` / `admin`)
+- Prometheus: `http://localhost:${PROMETHEUS_PORT:-9090}`
 
 Metrics endpoints (inside the compose network):
 
