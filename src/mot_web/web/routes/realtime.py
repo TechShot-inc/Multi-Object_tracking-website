@@ -30,6 +30,26 @@ router = APIRouter(prefix="/realtime")
 _REALTIME_BACKEND_WS = os.getenv("REALTIME_BACKEND_WS")
 
 
+def _backend_http_base() -> str | None:
+    """Best-effort HTTP base URL for the external realtime backend.
+
+    If REALTIME_BACKEND_HTTP is set, use it.
+    Otherwise, derive from REALTIME_BACKEND_WS when present.
+    """
+
+    raw = (os.getenv("REALTIME_BACKEND_HTTP") or "").strip()
+    if raw:
+        return raw.rstrip("/")
+    ws = (_REALTIME_BACKEND_WS or "").strip()
+    if not ws:
+        return None
+    if ws.startswith("ws://"):
+        return "http://" + ws[len("ws://") :].split("/", 1)[0]
+    if ws.startswith("wss://"):
+        return "https://" + ws[len("wss://") :].split("/", 1)[0]
+    return None
+
+
 _tracker_lock = threading.Lock()
 _tracker = None
 _tracker_error: str | None = None
@@ -128,6 +148,34 @@ async def realtime_track_fastapi(
     roi: str | None = Form(default=None),
     line: str | None = Form(default=None),
 ):
+    # If we have an external realtime backend configured (mot-realtime), proxy the HTTP
+    # fallback to it instead of trying to import/run CustomBoostTrack inside the web container.
+    # This avoids confusing "No module named 'CustomBoostTrack'" errors in dev.
+    backend = _backend_http_base()
+    if backend:
+        try:
+            import httpx
+
+            if frame is None:
+                return JSONResponse(status_code=400, content={"error": "No frame provided"})
+
+            jpeg_bytes = await frame.read()
+            files = {"frame": (frame.filename or "frame.jpg", jpeg_bytes, frame.content_type or "image/jpeg")}
+            data: dict[str, str] = {}
+            if roi is not None:
+                data["roi"] = roi
+            if line is not None:
+                data["line"] = line
+
+            # Keep a fairly small timeout so the UI can recover by retrying.
+            timeout = httpx.Timeout(connect=5.0, read=20.0, write=20.0, pool=5.0)
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                resp = await client.post(f"{backend}/realtime/track", files=files, data=data)
+            # Pass through response JSON (keeps frontend contract intact).
+            return JSONResponse(status_code=resp.status_code, content=resp.json())
+        except Exception as e:
+            return JSONResponse(status_code=502, content={"error": f"realtime backend proxy failed: {str(e)}"})
+
     if cv2 is None or np is None:
         return JSONResponse(status_code=503, content={"error": "OpenCV not installed - realtime tracking unavailable"})
 
