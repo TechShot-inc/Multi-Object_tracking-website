@@ -66,6 +66,18 @@
                 <div class="w-full bg-gray-200 rounded-full h-2.5 mt-2">
                     <div class="progress-bar bg-teal-500 h-2.5 rounded-full" style="width: 0%;" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>
                 </div>
+                <div id="job-status-panel" class="mt-4 hidden rounded-lg border border-gray-200 bg-gray-50 p-4">
+                    <div class="flex items-center justify-between gap-4">
+                        <div class="text-sm text-gray-700">
+                            <span class="font-medium">Job</span>
+                            <span id="job-id" class="font-mono text-xs text-gray-600"></span>
+                        </div>
+                        <span id="job-state-badge" class="inline-flex items-center rounded-full px-2 py-1 text-xs font-medium bg-gray-200 text-gray-700">unknown</span>
+                    </div>
+                    <div id="job-message" class="mt-2 text-sm text-gray-700"></div>
+                    <div id="job-queue" class="mt-2 text-xs text-gray-600 hidden"></div>
+                    <div id="job-updated" class="mt-1 text-xs text-gray-500"></div>
+                </div>
             </div>
         </section>
 
@@ -76,11 +88,30 @@
                 <button id="replay-video" class="px-4 py-2 bg-blue-900 text-white rounded-lg hover:bg-blue-800 transition">Replay</button>
                 <button id="download-video" class="px-4 py-2 bg-blue-900 text-white rounded-lg hover:bg-blue-800 transition">Download Video</button>
                 <button id="download-annotations" class="px-4 py-2 bg-blue-900 text-white rounded-lg hover:bg-blue-800 transition">Download Annotations</button>
+                <button id="download-analytics" class="px-4 py-2 bg-blue-900 text-white rounded-lg hover:bg-blue-800 transition">Download Analytics</button>
             </div>
         </section>
 
         <section id="analytics-section" class="bg-white p-8 rounded-xl shadow-xl hidden">
             <h2 class="text-2xl font-semibold text-blue-900 mb-6">Analytics</h2>
+            <div class="mb-6 grid grid-cols-1 md:grid-cols-4 gap-4">
+                <div class="rounded-lg border border-gray-200 bg-gray-50 p-4">
+                    <p class="text-xs text-gray-500">Total tracks</p>
+                    <p id="an-total-tracks" class="mt-1 text-2xl font-semibold text-gray-900">0</p>
+                </div>
+                <div class="rounded-lg border border-gray-200 bg-gray-50 p-4">
+                    <p class="text-xs text-gray-500">Avg objects / frame</p>
+                    <p id="an-avg-objects" class="mt-1 text-2xl font-semibold text-gray-900">0</p>
+                </div>
+                <div class="rounded-lg border border-gray-200 bg-gray-50 p-4">
+                    <p class="text-xs text-gray-500">Processed frames</p>
+                    <p id="an-processed-frames" class="mt-1 text-2xl font-semibold text-gray-900">0</p>
+                </div>
+                <div class="rounded-lg border border-gray-200 bg-gray-50 p-4">
+                    <p class="text-xs text-gray-500">Video info</p>
+                    <p id="an-video-info" class="mt-1 text-sm text-gray-700">—</p>
+                </div>
+            </div>
             <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div>
                     <h3 class="text-lg font-medium text-gray-800">Density Heatmap</h3>

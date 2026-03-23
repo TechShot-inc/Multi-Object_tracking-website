@@ -154,6 +154,16 @@ class TestAnalyticsEndpoint:
         data = resp.json()
         assert data["total_tracks"] == 5
 
+    def test_get_analytics_download_sets_content_disposition(self, app, completed_job) -> None:
+        """Should set Content-Disposition when download=1."""
+        client = TestClient(app)
+        resp = client.get(f"/video/results/{completed_job}/analytics?download=1")
+
+        assert resp.status_code == 200
+        cd = resp.headers.get("content-disposition", "")
+        assert "attachment" in cd
+        assert f"{completed_job}_analytics.json" in cd
+
 
 class TestFullUploadWorkflow:
     """Integration tests for the complete upload-process-results workflow."""

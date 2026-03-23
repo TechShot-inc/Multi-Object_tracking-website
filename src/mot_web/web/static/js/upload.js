@@ -9,6 +9,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const replayButton = document.getElementById('replay-video');
     const downloadVideoButton = document.getElementById('download-video');
     const downloadAnnotationsButton = document.getElementById('download-annotations');
+    const downloadAnalyticsButton = document.getElementById('download-analytics');
     const analyticsSection = document.getElementById('analytics-section');
     const heatmapImage = document.getElementById('heatmap-image');
     const heatmapInfo = document.getElementById('heatmap-info');
@@ -19,6 +20,18 @@ document.addEventListener('DOMContentLoaded', () => {
     const topIdsContainer = document.getElementById('top-ids-container');
     const avgVelocityElement = document.getElementById('avg-velocity');
     const downloadReportButton = document.getElementById('download-report');
+
+    const jobStatusPanel = document.getElementById('job-status-panel');
+    const jobIdEl = document.getElementById('job-id');
+    const jobStateBadge = document.getElementById('job-state-badge');
+    const jobMessageEl = document.getElementById('job-message');
+    const jobQueueEl = document.getElementById('job-queue');
+    const jobUpdatedEl = document.getElementById('job-updated');
+
+    const anTotalTracks = document.getElementById('an-total-tracks');
+    const anAvgObjects = document.getElementById('an-avg-objects');
+    const anProcessedFrames = document.getElementById('an-processed-frames');
+    const anVideoInfo = document.getElementById('an-video-info');
     const roiCanvasUpload = document.getElementById('roi-canvas-upload');
     const uploadPreview = document.getElementById('upload-preview');
     const roiInstruction = document.getElementById('roi-instruction');
@@ -253,9 +266,67 @@ document.addEventListener('DOMContentLoaded', () => {
     let currentJobId = null;
     let currentFilename = null;
 
+    function formatUnixTs(ts) {
+        if (!ts) return '';
+        try {
+            return new Date(ts * 1000).toLocaleString();
+        } catch {
+            return '';
+        }
+    }
+
+    function setStateBadge(state) {
+        if (!jobStateBadge) return;
+        const s = (state || 'unknown').toLowerCase();
+        jobStateBadge.textContent = s;
+        jobStateBadge.className = 'inline-flex items-center rounded-full px-2 py-1 text-xs font-medium';
+        if (s === 'done') {
+            jobStateBadge.classList.add('bg-green-100', 'text-green-800');
+        } else if (s === 'failed') {
+            jobStateBadge.classList.add('bg-red-100', 'text-red-800');
+        } else if (s === 'running') {
+            jobStateBadge.classList.add('bg-blue-100', 'text-blue-800');
+        } else if (s === 'queued') {
+            jobStateBadge.classList.add('bg-amber-100', 'text-amber-800');
+        } else if (s === 'created') {
+            jobStateBadge.classList.add('bg-gray-200', 'text-gray-700');
+        } else {
+            jobStateBadge.classList.add('bg-gray-200', 'text-gray-700');
+        }
+    }
+
+    function renderJobStatus(status) {
+        if (!jobStatusPanel) return;
+        jobStatusPanel.classList.remove('hidden');
+        if (jobIdEl) jobIdEl.textContent = status?.job_id ? status.job_id : (currentJobId || '');
+        setStateBadge(status?.state);
+        if (jobMessageEl) jobMessageEl.textContent = status?.message || '';
+        if (jobUpdatedEl) {
+            const ts = formatUnixTs(status?.updated_at_unix);
+            jobUpdatedEl.textContent = ts ? `Updated: ${ts}` : '';
+        }
+
+        if (jobQueueEl) {
+            const pos = status?.queue_position;
+            const len = status?.queue_length;
+            if (status?.state === 'queued' && pos && len) {
+                jobQueueEl.textContent = `Queue: position ${pos} of ${len}`;
+                jobQueueEl.classList.remove('hidden');
+            } else {
+                jobQueueEl.textContent = '';
+                jobQueueEl.classList.add('hidden');
+            }
+        }
+    }
+
     uploadForm.addEventListener('submit', async (e) => {
         e.preventDefault();
         const formData = new FormData(uploadForm);
+
+        const speedInput = document.getElementById('speed');
+        const outputSpeedInput = document.getElementById('output-speed');
+        const speed = speedInput ? parseInt(speedInput.value || '1', 10) : 1;
+        const outputSpeed = outputSpeedInput ? parseFloat(outputSpeedInput.value || '1') : 1.0;
         
         // Collect ROI data for later use in run request
         let roiData = null;
@@ -295,6 +366,8 @@ document.addEventListener('DOMContentLoaded', () => {
             
             currentJobId = uploadData.job_id;
             currentFilename = uploadData.filename;
+
+            renderJobStatus({ job_id: currentJobId, state: 'created', message: 'uploaded', updated_at_unix: Math.floor(Date.now() / 1000) });
             
             statusMessage.textContent = 'Starting processing...';
             progressBar.style.width = '20%';
@@ -304,7 +377,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const runResponse = await fetch(`/video/run/${currentJobId}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ roi: roiData })
+                body: JSON.stringify({ roi: roiData, speed: speed, output_speed: outputSpeed })
             });
             
             if (!runResponse.ok) {
@@ -314,6 +387,8 @@ document.addEventListener('DOMContentLoaded', () => {
             
             const runData = await runResponse.json();
             console.log('Run response:', runData);
+
+            renderJobStatus({ ...runData, job_id: currentJobId, message: runData.state || 'processing' });
             
             if (runData.state === 'done') {
                 statusMessage.textContent = 'Processing complete!';
@@ -344,6 +419,8 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             const data = await response.json();
             console.log('Status:', data);
+
+            renderJobStatus(data);
             
             if (data.state === 'done') {
                 statusMessage.textContent = 'Processing complete!';
@@ -353,7 +430,13 @@ document.addEventListener('DOMContentLoaded', () => {
             } else if (data.state === 'failed') {
                 throw new Error(data.message || 'Processing failed');
             } else if (data.state === 'queued' || data.state === 'running' || data.state === 'created') {
-                statusMessage.textContent = data.message || 'Processing...';
+                if (data.state === 'queued') {
+                    statusMessage.textContent = 'Queued...';
+                } else if (data.state === 'running') {
+                    statusMessage.textContent = 'Running...';
+                } else {
+                    statusMessage.textContent = data.message || 'Processing...';
+                }
                 // Keep progress moving while queued/running.
                 const current = parseInt(progressBar.getAttribute('aria-valuenow') || '30', 10);
                 const next = Math.min(95, Math.max(30, current + 5));
@@ -411,6 +494,18 @@ document.addEventListener('DOMContentLoaded', () => {
                 link.click();
                 document.body.removeChild(link);
             };
+
+            if (downloadAnalyticsButton) {
+                downloadAnalyticsButton.onclick = (e) => {
+                    e.preventDefault();
+                    const link = document.createElement('a');
+                    link.href = `/video/results/${jobId}/analytics?download=1`;
+                    link.download = `${jobId}_analytics.json`;
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                };
+            }
             await fetchAnalytics(jobId);
             resetUploadForm();
         } catch (error) {
@@ -437,6 +532,25 @@ document.addEventListener('DOMContentLoaded', () => {
             if (data.error) {
                 console.log('Analytics error:', data.error);
                 return;
+            }
+
+            if (anTotalTracks && data.total_tracks !== undefined) {
+                anTotalTracks.textContent = `${data.total_tracks}`;
+            }
+            if (anAvgObjects && data.avg_objects_per_frame !== undefined) {
+                anAvgObjects.textContent = `${data.avg_objects_per_frame}`;
+            }
+            if (anProcessedFrames) {
+                const pf = data?.video_info?.processed_frames;
+                anProcessedFrames.textContent = (pf !== undefined && pf !== null) ? `${pf}` : '0';
+            }
+            if (anVideoInfo) {
+                const vi = data?.video_info || {};
+                const parts = [];
+                if (vi.width && vi.height) parts.push(`${vi.width}x${vi.height}`);
+                if (vi.fps) parts.push(`${Number(vi.fps).toFixed(1)} fps`);
+                if (vi.total_frames) parts.push(`${vi.total_frames} frames`);
+                anVideoInfo.textContent = parts.length ? parts.join(' • ') : '—';
             }
             if (data.heatmap) {
                 heatmapImage.src = `data:image/png;base64,${data.heatmap}`;
@@ -527,25 +641,25 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
                 });
             }
-            if (data.top_ids && data.crops) {
+            if (topIdsContainer && data.top_ids) {
                 topIdsContainer.innerHTML = '';
-                data.top_ids.forEach((id, index) => {
-                    const idDiv = document.createElement('div');
-                    idDiv.className = 'top-id-item';
-                    idDiv.innerHTML = `
-                        <h4>Track ID: ${id}</h4>
-                        <div class="crops-container">
-                            ${data.crops[index].map(crop => `
-                                <img src="data:image/jpeg;base64,${crop}" alt="Track ${id} crop">
-                            `).join('')}
-                        </div>
-                    `;
-                    topIdsContainer.appendChild(idDiv);
-                });
+                const ids = Array.isArray(data.top_ids) ? data.top_ids : [];
+                if (ids.length === 0) {
+                    const empty = document.createElement('p');
+                    empty.className = 'text-sm text-gray-600';
+                    empty.textContent = 'No tracks found.';
+                    topIdsContainer.appendChild(empty);
+                } else {
+                    ids.forEach((id) => {
+                        const idDiv = document.createElement('div');
+                        idDiv.className = 'top-id-item rounded-lg border border-gray-200 bg-gray-50 p-3';
+                        idDiv.innerHTML = `<p class="text-sm text-gray-700"><span class="font-medium">Track ID</span>: ${id}</p>`;
+                        topIdsContainer.appendChild(idDiv);
+                    });
+                }
             }
-            if (data.avg_velocity !== undefined) {
-                avgVelocityElement.textContent = data.avg_velocity.toFixed(2);
-            }
+
+            // avg_velocity is not part of the default analytics contract; leave the UI value as-is.
             analyticsSection.classList.remove('hidden');
         } catch (error) {
             console.error('Error fetching analytics:', error);
@@ -564,6 +678,10 @@ document.addEventListener('DOMContentLoaded', () => {
         window.roiUpload = null;
         clearRoiButton.disabled = true;
         isRoiDrawingEnabled = false;
+
+        if (jobStatusPanel) {
+            jobStatusPanel.classList.add('hidden');
+        }
         if (roiInstruction) {
             roiInstruction.textContent = 'Upload a video to select ROI.';
             console.log('ROI instruction reset');

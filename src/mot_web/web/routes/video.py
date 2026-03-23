@@ -166,7 +166,7 @@ def get_result_video(request: Request, job_id: str, download: int | None = Query
 
 
 @router.get("/results/{job_id}/analytics")
-def get_analytics(request: Request, job_id: str):
+def get_analytics(request: Request, job_id: str, download: int | None = Query(default=None)):
     """Return analytics data for a completed job."""
     settings = request.app.state.settings
     job_dir = settings.results_dir / job_id
@@ -174,7 +174,8 @@ def get_analytics(request: Request, job_id: str):
     # Check if analytics file exists
     analytics_path = job_dir / "analytics.json"
     if analytics_path.exists():
-        return FileResponse(path=str(analytics_path), media_type="application/json")
+        filename = f"{job_id}_analytics.json" if download == 1 else None
+        return FileResponse(path=str(analytics_path), media_type="application/json", filename=filename)
 
     # Generate analytics from annotations if available
     annotations_path = job_dir / "annotations.json"
@@ -204,6 +205,9 @@ def get_analytics(request: Request, job_id: str):
             "track_durations": track_durations,
             "video_info": annotations.get("video_info", {}),
         }
-        return analytics
+        headers = None
+        if download == 1:
+            headers = {"Content-Disposition": f"attachment; filename=\"{job_id}_analytics.json\""}
+        return JSONResponse(status_code=200, content=analytics, headers=headers)
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": f"failed to generate analytics: {str(e)}"})

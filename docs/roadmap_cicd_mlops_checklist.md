@@ -132,15 +132,15 @@ Checklist
 Goal: fewer "mystery failures", better realtime UX, better job UX.
 
 Checklist
-- [ ] Realtime stats strip:
-  - [ ] FPS (client-side), server latency, object count
-- [ ] Better error UX:
-  - [ ] categorize tracker init vs WS timeout vs backend errors
-  - [ ] persistent inline error panel
-- [ ] Fix production cache-busting for JS/CSS
-- [ ] Video upload page:
-  - [ ] queue + job state UI (queued/running/done/failed)
-  - [ ] download results + analytics summary
+- [x] Realtime stats strip:
+  - [x] FPS (client-side), server latency, object count
+- [x] Better error UX:
+  - [x] categorize tracker init vs WS timeout vs backend errors
+  - [x] persistent inline error panel
+- [x] Fix production cache-busting for JS/CSS
+- [x] Video upload page:
+  - [x] queue + job state UI (queued/running/done/failed)
+  - [x] download results + analytics summary
 
 ---
 

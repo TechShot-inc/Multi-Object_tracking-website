@@ -106,4 +106,23 @@ def get_job_status(job_id: str) -> dict[str, Any] | None:
     if not settings.redis_url:
         return None
     r = _redis_from_url(settings.redis_url)
-    return _get_status_redis(r, job_id)
+    status = _get_status_redis(r, job_id)
+    if not status:
+        return None
+
+    # Best-effort queue details (useful for UI). Keep this resilient: never fail
+    # the status endpoint due to RQ quirks.
+    if status.get("state") == "queued":
+        try:
+            q = Queue(name="mot", connection=r)
+            ids = q.get_job_ids()
+            rq_job_id = status.get("rq_job_id")
+            if rq_job_id in ids:
+                status["queue_position"] = ids.index(rq_job_id) + 1
+            status["queue_length"] = len(ids)
+            status["queue_name"] = q.name
+        except Exception:
+            # Intentionally ignore.
+            pass
+
+    return status

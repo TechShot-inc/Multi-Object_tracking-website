@@ -50,6 +50,12 @@ def run_video(input_path: Path, output_dir: Path, params: dict[str, Any]) -> Non
     # Extract parameters
     roi = params.get("roi")
     speed = max(1, int(params.get("speed", 1)))
+    try:
+        output_speed = float(params.get("output_speed", 1.0))
+    except (TypeError, ValueError):
+        output_speed = 1.0
+    output_speed = max(0.1, min(10.0, output_speed))
+
     conf_threshold = params.get("conf_threshold", 0.25)
 
     # Check for GPU availability
@@ -98,7 +104,9 @@ def run_video(input_path: Path, output_dir: Path, params: dict[str, Any]) -> Non
 
     # Try H.264 codec first (browser compatible), fallback to mp4v
     fourcc = cv2.VideoWriter_fourcc(*"avc1")  # H.264 codec  # pyright: ignore[reportAttributeAccessIssue]
-    output_fps = fps / speed
+    # `speed` reduces processing load by skipping frames. `output_speed` only affects
+    # the playback rate of the output video.
+    output_fps = (fps / speed) * output_speed
     out = cv2.VideoWriter(str(output_video_path), fourcc, output_fps, (width, height))
 
     if not out.isOpened():
