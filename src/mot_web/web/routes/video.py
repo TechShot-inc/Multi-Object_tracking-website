@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import re
 from pathlib import Path
 from typing import Any
@@ -166,16 +165,29 @@ def get_result_video(request: Request, job_id: str, download: int | None = Query
 
 
 @router.get("/results/{job_id}/analytics")
-def get_analytics(request: Request, job_id: str, download: int | None = Query(default=None)):
+def get_analytics(
+    request: Request,
+    job_id: str,
+    download: int | None = Query(default=None),
+    format: str | None = Query(default=None),
+):
     """Return analytics data for a completed job."""
     settings = request.app.state.settings
     job_dir = settings.results_dir / job_id
 
+    fmt = (format or "json").strip().lower()
+    if fmt not in {"json", "csv"}:
+        return JSONResponse(status_code=400, content={"error": "invalid format", "allowed": ["json", "csv"]})
+
     # Check if analytics file exists
     analytics_path = job_dir / "analytics.json"
-    if analytics_path.exists():
+    analytics_csv_path = job_dir / "analytics.csv"
+    if fmt == "json" and analytics_path.exists():
         filename = f"{job_id}_analytics.json" if download == 1 else None
         return FileResponse(path=str(analytics_path), media_type="application/json", filename=filename)
+    if fmt == "csv" and analytics_csv_path.exists():
+        filename = f"{job_id}_analytics.csv" if download == 1 else None
+        return FileResponse(path=str(analytics_csv_path), media_type="text/csv", filename=filename)
 
     # Generate analytics from annotations if available
     annotations_path = job_dir / "annotations.json"
@@ -183,31 +195,19 @@ def get_analytics(request: Request, job_id: str, download: int | None = Query(de
         return JSONResponse(status_code=404, content={"error": "analytics not available"})
 
     try:
-        annotations = json.loads(annotations_path.read_text(encoding="utf-8"))
+        from mot_web.analytics import load_json, write_analytics_files
 
-        # Extract analytics from annotations
-        tracks = annotations.get("tracks", [])
-        object_counts = annotations.get("object_counts", {})
-        summary = annotations.get("summary", {})
+        annotations = load_json(annotations_path)
+        analytics = write_analytics_files(job_dir=job_dir, annotations=annotations)
 
-        # Build track durations
-        track_durations = {}
-        for track in tracks:
-            track_id = track.get("id", 0)
-            duration = track.get("duration_frames", len(track.get("detections", [])))
-            track_durations[str(track_id)] = duration
+        if fmt == "csv":
+            filename = f"{job_id}_analytics.csv" if download == 1 else None
+            return FileResponse(path=str(analytics_csv_path), media_type="text/csv", filename=filename)
 
-        analytics = {
-            "total_tracks": summary.get("total_tracks", len(tracks)),
-            "avg_objects_per_frame": summary.get("avg_objects_per_frame", 0),
-            "top_ids": summary.get("top_track_ids", [])[:5],
-            "object_counts": object_counts,
-            "track_durations": track_durations,
-            "video_info": annotations.get("video_info", {}),
-        }
-        headers = None
+        # JSON
         if download == 1:
-            headers = {"Content-Disposition": f"attachment; filename=\"{job_id}_analytics.json\""}
-        return JSONResponse(status_code=200, content=analytics, headers=headers)
+            filename = f"{job_id}_analytics.json"
+            return FileResponse(path=str(analytics_path), media_type="application/json", filename=filename)
+        return JSONResponse(status_code=200, content=analytics)
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": f"failed to generate analytics: {str(e)}"})

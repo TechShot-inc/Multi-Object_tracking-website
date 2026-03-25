@@ -300,6 +300,13 @@ def run_video(input_path: Path, output_dir: Path, params: dict[str, Any]) -> Non
     annotations_path = output_dir / "annotations.json"
     annotations_path.write_text(json.dumps(annotations, indent=2), encoding="utf-8")
 
+    try:
+        from mot_web.analytics import write_analytics_files
+
+        write_analytics_files(job_dir=output_dir, annotations=annotations)
+    except Exception:
+        logger.exception("Failed to write analytics exports")
+
     logger.info(f"Pipeline complete: {processed_frames} frames, {len(all_tracks)} tracks")
     logger.info(f"Output video: {output_video_path}")
     logger.info(f"Annotations: {annotations_path}")
@@ -389,3 +396,10 @@ def _create_stub_output(input_path: Path, output_dir: Path, params: dict[str, An
         json.dumps(annotations, indent=2),
         encoding="utf-8",
     )
+
+    try:
+        from mot_web.analytics import write_analytics_files
+
+        write_analytics_files(job_dir=output_dir, annotations=annotations)
+    except Exception:
+        logger.exception("Failed to write analytics exports (stub)")

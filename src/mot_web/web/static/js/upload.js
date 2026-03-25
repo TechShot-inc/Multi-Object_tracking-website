@@ -459,6 +459,9 @@ document.addEventListener('DOMContentLoaded', () => {
     async function displayResults(jobId) {
         try {
             resultsContainer.classList.remove('hidden');
+
+            // Expose current job id for the PDF report generator.
+            window.__motCurrentJobId = jobId;
             
             // Try to load the annotated video if it exists, otherwise show message
             resultVideo.src = `/video/results/${jobId}/video`;
@@ -533,6 +536,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 console.log('Analytics error:', data.error);
                 return;
             }
+
+            // Cache the last analytics payload for the PDF report generator.
+            window.__motLastAnalytics = data;
 
             if (anTotalTracks && data.total_tracks !== undefined) {
                 anTotalTracks.textContent = `${data.total_tracks}`;
@@ -643,23 +649,55 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             if (topIdsContainer && data.top_ids) {
                 topIdsContainer.innerHTML = '';
+                const topTracks = Array.isArray(data.top_tracks) ? data.top_tracks : null;
                 const ids = Array.isArray(data.top_ids) ? data.top_ids : [];
-                if (ids.length === 0) {
+
+                const items = (topTracks && topTracks.length)
+                    ? topTracks
+                    : ids.map((id) => ({ id }));
+
+                if (items.length === 0) {
                     const empty = document.createElement('p');
                     empty.className = 'text-sm text-gray-600';
                     empty.textContent = 'No tracks found.';
                     topIdsContainer.appendChild(empty);
                 } else {
-                    ids.forEach((id) => {
+                    items.forEach((item) => {
+                        const id = item?.id;
                         const idDiv = document.createElement('div');
                         idDiv.className = 'top-id-item rounded-lg border border-gray-200 bg-gray-50 p-3';
-                        idDiv.innerHTML = `<p class="text-sm text-gray-700"><span class="font-medium">Track ID</span>: ${id}</p>`;
+                        const durationFrames = item?.duration_frames;
+                        const dwellSeconds = item?.dwell_seconds;
+                        const thumb = item?.thumbnail_jpeg;
+
+                        const title = document.createElement('h4');
+                        title.className = 'text-sm font-medium text-gray-800';
+                        title.textContent = `Track ID: ${id}`;
+                        idDiv.appendChild(title);
+
+                        const meta = document.createElement('p');
+                        meta.className = 'mt-1 text-xs text-gray-600';
+                        const parts = [];
+                        if (durationFrames !== undefined && durationFrames !== null) parts.push(`${durationFrames} frames`);
+                        if (dwellSeconds !== undefined && dwellSeconds !== null) parts.push(`${Number(dwellSeconds).toFixed(2)} s`);
+                        meta.textContent = parts.length ? `Dwell: ${parts.join(' • ')}` : 'Dwell: —';
+                        idDiv.appendChild(meta);
+
+                        if (thumb) {
+                            const img = document.createElement('img');
+                            img.className = 'mt-3 w-40 h-auto rounded-md border border-gray-200';
+                            img.alt = `Track ${id} thumbnail`;
+                            img.src = `data:image/jpeg;base64,${thumb}`;
+                            idDiv.appendChild(img);
+                        }
                         topIdsContainer.appendChild(idDiv);
                     });
                 }
             }
 
-            // avg_velocity is not part of the default analytics contract; leave the UI value as-is.
+            if (avgVelocityElement && data.avg_velocity !== undefined && data.avg_velocity !== null) {
+                avgVelocityElement.textContent = `${Number(data.avg_velocity).toFixed(2)}`;
+            }
             analyticsSection.classList.remove('hidden');
         } catch (error) {
             console.error('Error fetching analytics:', error);

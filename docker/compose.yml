@@ -13,6 +13,7 @@ services:
 
   # Development service with hot-reload
   mot-web-dev:
+    image: mot-web-dev
     build:
       context: ..
       dockerfile: docker/Dockerfile
@@ -96,6 +97,7 @@ services:
       start_period: 10s
 
   mot-worker:
+    image: mot-worker
     build:
       context: ..
       dockerfile: docker/Dockerfile
@@ -125,6 +127,8 @@ services:
       - MOT_PIPELINE=boosttrack
       - YOLO_CONFIG_DIR=/tmp/Ultralytics
     volumes:
+      # Use live source in dev so code changes don't require rebuilds
+      - ../src:/app/src:ro
       - mot-uploads:/app/var/uploads
       - mot-results:/app/var/results
     depends_on:
@@ -136,6 +140,7 @@ services:
   # GPU-backed realtime inference service (YOLO11+YOLO12 ensemble + BoostTrack)
   # Web proxies browser WebSocket traffic to this service.
   mot-realtime:
+    image: mot-realtime
     build:
       context: ..
       dockerfile: docker/Dockerfile
@@ -177,11 +182,13 @@ services:
       - YOLO11_MODEL_PATH=/app/models/yolo11x.pt
       - YOLO12_MODEL_PATH=/app/models/yolo12x.pt
       - REID_MODEL_PATH=/app/models/osnet_ain_ms_m_c.pth.tar
-      - DETECTOR_BACKEND=${DETECTOR_BACKEND:-local}
+      - DETECTOR_BACKEND=${REALTIME_DETECTOR_BACKEND:-triton}
       - TRITON_URL=triton:8001
       - TRITON_YOLO11_MODEL=${TRITON_YOLO11_MODEL:-yolo11}
       - TRITON_YOLO12_MODEL=${TRITON_YOLO12_MODEL:-yolo12}
     volumes:
+      # Use live source in dev so code changes don't require rebuilds
+      - ../src:/app/src:ro
       - ../models:/app/models:ro
       - ../CustomBoostTrack:/app/CustomBoostTrack:ro
     restart: unless-stopped

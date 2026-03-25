@@ -1144,6 +1144,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "fastapi" },
+    { name = "httpx" },
     { name = "jinja2" },
     { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "numpy", version = "2.4.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
@@ -1184,6 +1185,7 @@ ml = [
 requires-dist = [
     { name = "fastapi", specifier = ">=0.111" },
     { name = "gdown", marker = "extra == 'ml'", specifier = ">=5.1.0" },
+    { name = "httpx", specifier = ">=0.25" },
     { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.25" },
     { name = "jinja2", specifier = ">=3.1" },
     { name = "lap", marker = "extra == 'ml'", specifier = ">=0.4.0" },

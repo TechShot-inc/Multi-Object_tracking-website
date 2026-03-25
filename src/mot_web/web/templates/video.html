@@ -179,13 +179,122 @@
 
         // Download Report Implementation
         document.getElementById('download-report').addEventListener('click', async () => {
-            const { jsPDF } = window.jspdf;
-            const doc = new jsPDF();
+            try {
+                if (!window.jspdf || !window.jspdf.jsPDF) {
+                    throw new Error('PDF library failed to load');
+                }
+                const { jsPDF } = window.jspdf;
+                const doc = new jsPDF();
             let yOffset = 20;
+
+            const pageH = 297;
+            const marginTop = 15;
+            const marginBottom = 15;
+            const maxY = pageH - marginBottom;
+
+            const pageW = 210;
+            const marginX = 15;
+            const contentW = pageW - (marginX * 2);
+
+            function ensureSpace(lines = 1) {
+                const needed = lines * 6;
+                if (yOffset + needed > maxY) {
+                    doc.addPage();
+                    yOffset = marginTop;
+                }
+            }
+
+            function addHeading(text) {
+                ensureSpace(2);
+                doc.setFontSize(13);
+                doc.text(String(text), 20, yOffset);
+                yOffset += 8;
+                doc.setFontSize(11);
+            }
+
+            function addCardsRow(cards) {
+                // cards: [{title, value}]
+                const gap = 4;
+                const cardH = 18;
+                const cols = 2;
+                const cardW = (contentW - gap) / cols;
+                const startX = marginX;
+
+                const rows = Math.ceil(cards.length / cols);
+                ensureSpace(rows * (cardH + gap) / 6 + 1);
+
+                doc.setDrawColor(210);
+                doc.setTextColor(40);
+
+                let i = 0;
+                for (let r = 0; r < rows; r++) {
+                    for (let c = 0; c < cols; c++) {
+                        if (i >= cards.length) break;
+                        const x = startX + c * (cardW + gap);
+                        const y = yOffset + r * (cardH + gap);
+                        doc.roundedRect(x, y, cardW, cardH, 2, 2);
+                        doc.setFontSize(9);
+                        doc.text(String(cards[i].title || '').slice(0, 28), x + 3, y + 6);
+                        doc.setFontSize(14);
+                        const v = (cards[i].value === undefined || cards[i].value === null) ? '—' : String(cards[i].value);
+                        doc.text(v.slice(0, 18), x + 3, y + 14);
+                        i++;
+                    }
+                }
+                yOffset += rows * (cardH + gap) + 6;
+                doc.setFontSize(11);
+            }
+
+            function addKV(key, value) {
+                ensureSpace(1);
+                const k = String(key);
+                const v = (value === undefined || value === null) ? '—' : String(value);
+                doc.text(`${k}: ${v}`.slice(0, 110), 20, yOffset);
+                yOffset += 6;
+            }
+
+            function addWrapped(label, value) {
+                const text = `${label}: ${value}`;
+                const lines = doc.splitTextToSize(String(text), 170);
+                ensureSpace(lines.length + 1);
+                doc.text(lines, 20, yOffset);
+                yOffset += lines.length * 6;
+            }
+
+            async function getAnalyticsPayload() {
+                if (window.__motLastAnalytics) return window.__motLastAnalytics;
+                const jobIdEl = document.getElementById('job-id');
+                const jobIdFromDom = jobIdEl ? (jobIdEl.textContent || '').trim() : '';
+                const jobId = (window.__motCurrentJobId || jobIdFromDom || '').trim();
+                if (!jobId) return null;
+                try {
+                    const resp = await fetch(`/video/results/${jobId}/analytics`);
+                    if (!resp.ok) return null;
+                    const data = await resp.json();
+                    window.__motLastAnalytics = data;
+                    return data;
+                } catch {
+                    return null;
+                }
+            }
 
             doc.setFontSize(16);
             doc.text('Multi-Object Tracking Report', 20, yOffset);
             yOffset += 10;
+
+            const analytics = await getAnalyticsPayload();
+            if (analytics) {
+                // Summary cards (mirror web view)
+                const vi = analytics.video_info || {};
+                const processedFrames = (vi && vi.processed_frames !== undefined && vi.processed_frames !== null) ? vi.processed_frames : 0;
+                addCardsRow([
+                    { title: 'Total tracks', value: analytics.total_tracks },
+                    { title: 'Avg objects / frame', value: analytics.avg_objects_per_frame },
+                    { title: 'Processed frames', value: processedFrames },
+                    { title: 'Avg velocity (px/frame)', value: analytics.avg_velocity },
+                ]);
+                addWrapped('Video info', `${vi.width || '?'}x${vi.height || '?'} • ${vi.fps ? Number(vi.fps).toFixed(2) : '?'} fps • ${vi.total_frames || '?'} frames`);
+            }
 
             const heatmapImage = document.getElementById('heatmap-image');
             if (heatmapImage.src && !heatmapImage.classList.contains('hidden')) {
@@ -194,6 +303,7 @@
                 yOffset += 10;
                 try {
                     const imgData = await getImageData(heatmapImage);
+                    ensureSpace(16);
                     doc.addImage(imgData, 'PNG', 20, yOffset, 170, 85);
                     yOffset += 90;
                 } catch (e) {
@@ -209,6 +319,7 @@
                 yOffset += 10;
                 try {
                     const imgData = await getImageData(velocityHeatmapImage);
+                    ensureSpace(16);
                     doc.addImage(imgData, 'PNG', 20, yOffset, 170, 85);
                     yOffset += 90;
                 } catch (e) {
@@ -224,6 +335,7 @@
                 yOffset += 10;
                 try {
                     const chartData = objectCountChartCanvas.toDataURL('image/png');
+                    ensureSpace(16);
                     doc.addImage(chartData, 'PNG', 20, yOffset, 170, 85);
                     yOffset += 90;
                 } catch (e) {
@@ -239,6 +351,7 @@
                 yOffset += 10;
                 try {
                     const chartData = trackDurationChartCanvas.toDataURL('image/png');
+                    ensureSpace(16);
                     doc.addImage(chartData, 'PNG', 20, yOffset, 170, 85);
                     yOffset += 90;
                 } catch (e) {
@@ -248,20 +361,33 @@
             }
 
             const topIdsContainer = document.getElementById('top-ids-container');
-            if (topIdsContainer.children.length > 0) {
+            if (topIdsContainer && topIdsContainer.children && topIdsContainer.children.length > 0) {
                 doc.setFontSize(12);
                 doc.text('Top Tracked Objects', 20, yOffset);
                 yOffset += 10;
                 const items = topIdsContainer.querySelectorAll('.top-id-item');
                 for (let item of items) {
-                    const id = item.querySelector('h4').textContent;
-                    doc.text(id, 20, yOffset);
+                    const h4 = item.querySelector('h4');
+                    const id = h4 ? h4.textContent : (item.textContent || 'Track');
+                    doc.text(String(id).slice(0, 80), 20, yOffset);
                     yOffset += 10;
+
+                    const meta = item.querySelector('p');
+                    if (meta && meta.textContent) {
+                        doc.setFontSize(10);
+                        const lines = doc.splitTextToSize(String(meta.textContent), 170);
+                        ensureSpace(lines.length + 1);
+                        doc.text(lines, 20, yOffset);
+                        yOffset += lines.length * 5;
+                        doc.setFontSize(12);
+                    }
+
                     const crops = item.querySelectorAll('img');
                     let xOffset = 20;
                     for (let crop of crops) {
                         try {
                             const imgData = await getImageData(crop);
+                            ensureSpace(10);
                             doc.addImage(imgData, 'JPEG', xOffset, yOffset, 40, 40);
                             xOffset += 45;
                             if (xOffset > 160) {
@@ -282,7 +408,59 @@
             doc.text(`Average Velocity: ${avgVelocity} px/frame`, 20, yOffset);
             yOffset += 10;
 
+            // Extra analytics sections (derived analytics) — keep in the PDF after the web-mirrored view.
+            if (analytics) {
+                if (analytics.occupancy) {
+                    addHeading('Occupancy (Derived)');
+                    addKV('Peak occupancy (objects/frame)', analytics.occupancy.peak);
+                    const roi = analytics.occupancy.roi_per_second;
+                    if (Array.isArray(roi) && roi.length) {
+                        addKV('ROI occupancy samples', roi.length);
+                    }
+                }
+
+                if (analytics.dwell_time) {
+                    addHeading('Dwell Time (Derived)');
+                    const st = analytics.dwell_time.stats || {};
+                    addKV('Tracks counted', st.count);
+                    addKV('Mean (s)', st.mean_s);
+                    addKV('P50 (s)', st.p50_s);
+                    addKV('P90 (s)', st.p90_s);
+                    addKV('Max (s)', st.max_s);
+                    const hist = analytics.dwell_time.histogram || {};
+                    if (hist && typeof hist === 'object') {
+                        const entries = Object.entries(hist);
+                        if (entries.length) {
+                            addWrapped('Histogram', entries.map(([k, v]) => `${k}=${v}`).join('  '));
+                        }
+                    }
+                }
+
+                if (analytics.flow) {
+                    addHeading('Flow (Derived)');
+                    addKV('Peak throughput (tracks/sec)', analytics.flow.peak_throughput_tracks_per_second);
+                    const dh = analytics.flow.direction_histogram || {};
+                    if (dh && typeof dh === 'object') {
+                        const entries = Object.entries(dh);
+                        if (entries.length) {
+                            addWrapped('Direction histogram', entries.map(([k, v]) => `${k}=${v}`).join('  '));
+                        }
+                    }
+                }
+
+                if (analytics.track_quality) {
+                    addHeading('Track Quality (Derived)');
+                    addKV('Avg lifetime (s)', analytics.track_quality.avg_lifetime_s);
+                    addKV('Avg fragmentation gaps', analytics.track_quality.avg_fragmentation_gaps);
+                    addKV('Avg lost rate', analytics.track_quality.avg_lost_rate);
+                }
+            }
+
             doc.save('tracking_report.pdf');
+            } catch (err) {
+                console.error('Failed to generate PDF report:', err);
+                alert(`Failed to generate PDF report: ${err && err.message ? err.message : err}`);
+            }
         });
     </script>
 </body>

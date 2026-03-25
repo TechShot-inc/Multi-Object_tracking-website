@@ -45,8 +45,11 @@ def _queue_count(q: Queue) -> int:
     try:
         c = getattr(q, "count", None)
         if callable(c):
-            return int(c())
-        if c is not None:
+            v = c()
+            if isinstance(v, (int, float, str)):
+                return int(v)
+            return 0
+        if isinstance(c, (int, float, str)):
             return int(c)
     except Exception:
         pass

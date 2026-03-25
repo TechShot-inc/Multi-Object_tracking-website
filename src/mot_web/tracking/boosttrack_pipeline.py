@@ -336,6 +336,13 @@ def run_video_boosttrack(input_path: Path, output_dir: Path, params: dict[str, A
     }
     annotations_json.write_text(json.dumps(annotations, indent=2), encoding="utf-8")
 
+    try:
+        from mot_web.analytics import write_analytics_files
+
+        write_analytics_files(job_dir=output_dir, annotations=annotations)
+    except Exception:
+        logger.exception("Failed to write analytics exports")
+
     return BoostTrackArtifacts(
         mot_txt=mot_txt,
         annotated_video=annotated_video,

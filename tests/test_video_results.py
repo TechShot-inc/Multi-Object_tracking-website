@@ -164,6 +164,15 @@ class TestAnalyticsEndpoint:
         assert "attachment" in cd
         assert f"{completed_job}_analytics.json" in cd
 
+    def test_get_analytics_csv_format(self, app, completed_job) -> None:
+        """Should return analytics.csv when format=csv."""
+        client = TestClient(app)
+        resp = client.get(f"/video/results/{completed_job}/analytics?format=csv")
+
+        assert resp.status_code == 200
+        assert resp.headers["content-type"].startswith("text/csv")
+        assert "track_id" in resp.text
+
 
 class TestFullUploadWorkflow:
     """Integration tests for the complete upload-process-results workflow."""

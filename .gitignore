@@ -5,6 +5,20 @@ var/
 *.json
 !pyrightconfig.json
 
+# Test / coverage outputs
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Lint/typecheck caches
+.ruff_cache/
+.mypy_cache/
+.pyright/
+
+# Jupyter
+.ipynb_checkpoints/
+
 # Local-only internal notes / generated summaries
 docs/internal/
 
@@ -21,8 +35,6 @@ artifacts/
 
 # Compiled artifacts
 *.so
-
-CustomBoosttrack/
 
 __pycache__/
 *.pyc

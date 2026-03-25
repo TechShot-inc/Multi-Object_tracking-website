@@ -80,6 +80,14 @@ const errorPanelEl = document.getElementById('realtime-error');
 const errorKindEl = document.getElementById('realtime-error-kind');
 const errorMessageEl = document.getElementById('realtime-error-message');
 
+// Camera selection (local webcams)
+const cameraSelectEl = document.getElementById('realtime-camera-select');
+const cameraRefreshBtn = document.getElementById('realtime-camera-refresh');
+const cameraHintEl = document.getElementById('realtime-camera-hint');
+
+const RT_CAMERA_STORAGE_KEY = 'mot_rt_camera_device_id';
+let _rtSelectedCameraDeviceId = null;
+
 let _rtLastLatencyMs = null;
 let _rtLastObjects = null;
 let _rtFrameTimes = [];
@@ -150,6 +158,10 @@ function initializeWebcam() {
     _rtClearError();
     _rtClearStats();
     document.getElementById('realtime-status').querySelector('.status-message').textContent = 'Ready to start tracking';
+
+    // Camera chooser
+    setupCameraChooser();
+
     // Set up line position radio buttons
     document.querySelectorAll('input[name="line-position"]').forEach(radio => {
         radio.addEventListener('change', (e) => {
@@ -158,6 +170,144 @@ function initializeWebcam() {
             drawLine();
         });
     });
+}
+
+function _rtIsCameraSecureEnough() {
+    const host = window.location.hostname;
+    const isLocalhost = (host === 'localhost' || host === '127.0.0.1' || host === '::1');
+    return window.isSecureContext || isLocalhost;
+}
+
+function _rtSetCameraHint(text) {
+    if (!cameraHintEl) return;
+    cameraHintEl.textContent = text || '';
+}
+
+async function _rtEnumerateVideoInputs() {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) {
+        return [];
+    }
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    return (devices || []).filter(d => d && d.kind === 'videoinput');
+}
+
+function _rtPopulateCameraSelect(videoInputs) {
+    if (!cameraSelectEl) return;
+    const prev = cameraSelectEl.value;
+    const stored = localStorage.getItem(RT_CAMERA_STORAGE_KEY);
+    const desired = _rtSelectedCameraDeviceId || prev || stored || '';
+
+    // Rebuild options (keep the first default option)
+    cameraSelectEl.innerHTML = '<option value="">Default camera</option>';
+    (videoInputs || []).forEach((d, idx) => {
+        const opt = document.createElement('option');
+        opt.value = d.deviceId || '';
+        const label = (d.label && d.label.trim()) ? d.label : `Camera ${idx + 1}`;
+        opt.textContent = label;
+        cameraSelectEl.appendChild(opt);
+    });
+
+    // Try to restore selection
+    if (desired) {
+        const has = Array.from(cameraSelectEl.options).some(o => o.value === desired);
+        cameraSelectEl.value = has ? desired : '';
+    } else {
+        cameraSelectEl.value = '';
+    }
+
+    _rtSelectedCameraDeviceId = cameraSelectEl.value || null;
+    if (_rtSelectedCameraDeviceId) {
+        localStorage.setItem(RT_CAMERA_STORAGE_KEY, _rtSelectedCameraDeviceId);
+    } else {
+        localStorage.removeItem(RT_CAMERA_STORAGE_KEY);
+    }
+}
+
+async function refreshCameraList({ requestPermission } = { requestPermission: false }) {
+    if (!cameraSelectEl || !cameraRefreshBtn) return;
+
+    if (!_rtIsCameraSecureEnough()) {
+        cameraSelectEl.disabled = true;
+        cameraRefreshBtn.disabled = true;
+        _rtSetCameraHint('Camera requires HTTPS or localhost');
+        return;
+    }
+
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        cameraSelectEl.disabled = true;
+        cameraRefreshBtn.disabled = true;
+        _rtSetCameraHint('Camera not supported in this browser');
+        return;
+    }
+
+    cameraRefreshBtn.disabled = true;
+    _rtSetCameraHint('Loading cameras...');
+
+    // To get human-friendly labels, we may need to request permission first.
+    // We immediately stop that temporary stream.
+    if (requestPermission) {
+        try {
+            const tmp = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+            try {
+                tmp.getTracks().forEach(t => t.stop());
+            } catch (e) {
+                // ignore
+            }
+        } catch (e) {
+            const msg = (e && (e.message || e.name)) ? (e.message || e.name) : String(e);
+            _rtSetCameraHint('Camera permission denied');
+            cameraRefreshBtn.disabled = false;
+            _rtSetError('Camera', msg);
+            return;
+        }
+    }
+
+    try {
+        const inputs = await _rtEnumerateVideoInputs();
+        _rtPopulateCameraSelect(inputs);
+        if (!inputs || inputs.length === 0) {
+            _rtSetCameraHint('No cameras found');
+        } else {
+            _rtSetCameraHint(`${inputs.length} camera(s) available`);
+        }
+    } catch (e) {
+        const msg = (e && (e.message || e.name)) ? (e.message || e.name) : String(e);
+        _rtSetCameraHint('Failed to load cameras');
+        _rtSetError('Camera', msg);
+    } finally {
+        cameraRefreshBtn.disabled = false;
+    }
+}
+
+function setupCameraChooser() {
+    if (!cameraSelectEl || !cameraRefreshBtn) return;
+
+    // Restore previous choice (may not match until devices are enumerated)
+    const stored = localStorage.getItem(RT_CAMERA_STORAGE_KEY);
+    _rtSelectedCameraDeviceId = stored || null;
+
+    cameraSelectEl.addEventListener('change', () => {
+        _rtSelectedCameraDeviceId = cameraSelectEl.value || null;
+        if (_rtSelectedCameraDeviceId) {
+            localStorage.setItem(RT_CAMERA_STORAGE_KEY, _rtSelectedCameraDeviceId);
+        } else {
+            localStorage.removeItem(RT_CAMERA_STORAGE_KEY);
+        }
+    });
+
+    cameraRefreshBtn.addEventListener('click', async () => {
+        await refreshCameraList({ requestPermission: true });
+    });
+
+    if (!_rtIsCameraSecureEnough()) {
+        _rtSetCameraHint('Camera requires HTTPS or localhost');
+        return;
+    }
+
+    // Best-effort initial enumeration (labels may be blank until permission).
+    // Do not override the hint after this call; refreshCameraList controls status text.
+    _rtSetCameraHint('Click “Refresh cameras” to list devices');
+    refreshCameraList({ requestPermission: false });
 }
 
 function startTracking() {
@@ -170,9 +320,7 @@ function startTracking() {
 
     // Camera access requires a secure context in most browsers. HTTP is allowed for localhost
     // but NOT for arbitrary LAN IPs / 0.0.0.0.
-    const host = window.location.hostname;
-    const isLocalhost = (host === 'localhost' || host === '127.0.0.1' || host === '::1');
-    if (!window.isSecureContext && !isLocalhost) {
+    if (!_rtIsCameraSecureEnough()) {
         console.error('Insecure context for camera:', window.location.origin);
         document.getElementById('start-tracking').disabled = false;
         document.getElementById('realtime-status').querySelector('.status-message').textContent = 'Camera requires HTTPS or localhost';
@@ -193,13 +341,24 @@ function startTracking() {
         return;
     }
 
-    navigator.mediaDevices.getUserMedia({
-        video: {
-            width: { ideal: CAPTURE_WIDTH_IDEAL },
-            height: { ideal: CAPTURE_HEIGHT_IDEAL },
-            facingMode: "user"
-        }
-    }).then(stream => {
+    // Lock camera selector while tracking is active.
+    if (cameraSelectEl) cameraSelectEl.disabled = true;
+    if (cameraRefreshBtn) cameraRefreshBtn.disabled = true;
+
+    const deviceId = _rtSelectedCameraDeviceId || (cameraSelectEl ? (cameraSelectEl.value || null) : null);
+    const videoConstraints = {
+        width: { ideal: CAPTURE_WIDTH_IDEAL },
+        height: { ideal: CAPTURE_HEIGHT_IDEAL },
+    };
+
+    if (deviceId) {
+        videoConstraints.deviceId = { exact: deviceId };
+    } else {
+        // Backward-compatible default
+        videoConstraints.facingMode = "user";
+    }
+
+    navigator.mediaDevices.getUserMedia({ video: videoConstraints, audio: false }).then(stream => {
         dlog('Webcam stream acquired');
         video.srcObject = stream;
         videoStream = stream;
@@ -218,6 +377,9 @@ function startTracking() {
                 document.getElementById('stop-tracking').disabled = false;
                 document.getElementById('realtime-status').querySelector('.status-message').textContent = 'Camera active, starting tracking...';
                 requestAnimationFrame(processFrames);
+
+                // Update camera list (now that we have permission, labels should be available)
+                refreshCameraList({ requestPermission: false });
             }).catch(err => {
                 console.error('Video play error:', err);
                 document.getElementById('start-tracking').disabled = false;
@@ -234,6 +396,9 @@ function startTracking() {
         const msg = (err && (err.message || err.name)) ? (err.message || err.name) : String(err);
         _rtSetError('Camera', msg);
         showModal('Error accessing webcam: ' + msg);
+
+        if (cameraSelectEl) cameraSelectEl.disabled = false;
+        if (cameraRefreshBtn) cameraRefreshBtn.disabled = false;
     });
 }
 
@@ -260,6 +425,9 @@ function stopTracking() {
     lineCtx.clearRect(0, 0, lineCanvas.width, lineCanvas.height);
     personsInsideSpan.textContent = '0';
     personsOutsideSpan.textContent = '0';
+
+    if (cameraSelectEl) cameraSelectEl.disabled = false;
+    if (cameraRefreshBtn) cameraRefreshBtn.disabled = false;
 }
 
 let lastFrameTime = 0;

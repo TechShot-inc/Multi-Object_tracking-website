@@ -25,8 +25,6 @@ WORKDIR /app
 
 COPY pyproject.toml ./
 COPY uv.lock ./
-COPY src/ ./src/
-COPY scripts/ ./scripts/
 
 ARG PIP_TIMEOUT=120
 ARG PIP_RETRIES=10
@@ -42,7 +40,12 @@ ENV UV_PROJECT_ENVIRONMENT=/app/.venv \
 
 RUN --mount=type=cache,target=/root/.cache/uv \
     python -m pip install --upgrade pip setuptools wheel uv && \
-    uv sync --frozen
+    uv sync --frozen --no-install-project
+
+COPY src/ ./src/
+COPY scripts/ ./scripts/
+
+RUN uv pip install --no-deps -e .
 
 RUN mkdir -p /app/var/uploads /app/var/results && \
     chown -R appuser:appuser /app
@@ -69,15 +72,20 @@ CMD ["mot-web"]
 # -----------------
 FROM base AS worker
 
-COPY CustomBoostTrack/ ./CustomBoostTrack/
-RUN mkdir -p /app/models
-
 ENV UV_PROJECT_ENVIRONMENT=/app/.venv \
     PATH=/app/.venv/bin:$PATH
 
 RUN --mount=type=cache,target=/root/.cache/uv \
     python -m pip install --upgrade pip setuptools wheel uv && \
-    uv sync --frozen --extra ml
+    uv sync --frozen --extra ml --no-install-project
+
+COPY src/ ./src/
+COPY scripts/ ./scripts/
+COPY CustomBoostTrack/ ./CustomBoostTrack/
+
+RUN uv pip install --no-deps -e .
+
+RUN mkdir -p /app/models
 
 ARG DOWNLOAD_MODELS=0
 RUN --mount=type=cache,target=/root/.cache/mot-weights \
@@ -146,11 +154,6 @@ WORKDIR /app
 
 COPY pyproject.toml ./
 COPY uv.lock ./
-COPY src/ ./src/
-COPY scripts/ ./scripts/
-COPY CustomBoostTrack/ ./CustomBoostTrack/
-
-RUN mkdir -p /app/models
 
 
 # Optional: set TORCH_INDEX_URL to help pip select CUDA wheels on GPU builds.
@@ -163,7 +166,15 @@ ENV UV_PROJECT_ENVIRONMENT=/app/.venv \
 RUN --mount=type=cache,target=/root/.cache/uv \
     python -m pip install --upgrade pip setuptools wheel uv && \
     if [ -n "${TORCH_INDEX_URL}" ]; then export PIP_EXTRA_INDEX_URL="${TORCH_INDEX_URL}"; fi && \
-    uv sync --frozen --extra ml
+    uv sync --frozen --extra ml --no-install-project
+
+COPY src/ ./src/
+COPY scripts/ ./scripts/
+COPY CustomBoostTrack/ ./CustomBoostTrack/
+
+RUN uv pip install --no-deps -e .
+
+RUN mkdir -p /app/models
 
 ARG DOWNLOAD_MODELS=0
 RUN --mount=type=cache,target=/root/.cache/mot-weights \
@@ -202,16 +213,20 @@ CMD ["python", "-m", "mot_web.worker"]
 # -----------------
 FROM base AS tests
 
-COPY tests/ ./tests/
-COPY pytest.ini ./pytest.ini
-COPY pyrightconfig.json ./pyrightconfig.json
-
 ENV UV_PROJECT_ENVIRONMENT=/app/.venv \
     PATH=/app/.venv/bin:$PATH
 
 RUN --mount=type=cache,target=/root/.cache/uv \
     python -m pip install --upgrade pip setuptools wheel uv && \
-    uv sync --frozen --extra dev
+    uv sync --frozen --extra dev --no-install-project
+
+COPY src/ ./src/
+COPY scripts/ ./scripts/
+COPY tests/ ./tests/
+COPY pytest.ini ./pytest.ini
+COPY pyrightconfig.json ./pyrightconfig.json
+
+RUN uv pip install --no-deps -e .
 
 RUN mkdir -p /app/var/uploads /app/var/results && \
     chown -R appuser:appuser /app
@@ -232,15 +247,19 @@ CMD ["pytest", "-q", "tests"]
 # -----------------
 FROM base AS itest-ml
 
-COPY tests/ ./tests/
-COPY pytest.ini ./pytest.ini
-
 ENV UV_PROJECT_ENVIRONMENT=/app/.venv \
     PATH=/app/.venv/bin:$PATH
 
 RUN --mount=type=cache,target=/root/.cache/uv \
     python -m pip install --upgrade pip setuptools wheel uv && \
-    uv sync --frozen --extra dev --extra ml
+    uv sync --frozen --extra dev --extra ml --no-install-project
+
+COPY src/ ./src/
+COPY scripts/ ./scripts/
+COPY tests/ ./tests/
+COPY pytest.ini ./pytest.ini
+
+RUN uv pip install --no-deps -e .
 
 USER appuser
 

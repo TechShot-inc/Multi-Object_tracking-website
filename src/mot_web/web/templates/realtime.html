@@ -45,6 +45,20 @@
                 <span class="font-semibold" id="realtime-error-kind">Error</span>:
                 <span id="realtime-error-message"></span>
             </div>
+
+            <!-- Camera selection -->
+            <div class="mb-6">
+                <label class="block text-sm font-medium text-gray-700">Camera</label>
+                <p class="text-sm text-gray-500">Choose which local camera to use for real-time tracking.</p>
+                <div class="mt-2 flex flex-wrap items-center gap-3">
+                    <select id="realtime-camera-select" class="min-w-[260px] rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-800">
+                        <option value="">Default camera</option>
+                    </select>
+                    <button type="button" id="realtime-camera-refresh" class="px-4 py-2 bg-gray-200 text-gray-800 rounded-lg hover:bg-gray-300 transition">Refresh cameras</button>
+                    <span id="realtime-camera-hint" class="text-sm text-gray-500"></span>
+                </div>
+            </div>
+
             <div class="mb-6">
                 <label class="block text-sm font-medium text-gray-700">Region of Interest (ROI)</label>
                 <p class="text-sm text-gray-500">Optionally draw a rectangle on the video to limit tracking to that area.</p>
