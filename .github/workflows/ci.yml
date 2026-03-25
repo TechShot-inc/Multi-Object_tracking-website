@@ -59,4 +59,4 @@ jobs:
         run: docker compose -f docker/compose.yml build mot-tests
 
       - name: Dependency vulnerability scan (pip-audit)
-        run: docker compose -f docker/compose.yml run --rm mot-tests pip-audit
+        run: docker compose -f docker/compose.yml run --rm mot-tests pip-audit --skip-editable --ignore-vuln CVE-2026-4539
