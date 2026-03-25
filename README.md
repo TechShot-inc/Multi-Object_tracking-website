@@ -13,6 +13,18 @@ Key components:
 - Tracking pipeline: BoostTrack-based tracker + YOLO detectors.
 - Optional Triton inference: GPU-backed ensemble detector (YOLO11 + YOLO12) served via NVIDIA Triton Inference Server.
 
+---
+
+## System diagrams
+
+### Full system architecture
+
+<img src="FullSystemArchitecture.png" alt="Full system architecture" width="900" />
+
+### MOT pipeline (YOLO11 + YOLO12 + ReID + BoostTrack++)
+
+<img src="MOTPipeline.png" alt="Multi-object tracking pipeline" width="900" />
+
 If you’re new to the project, start here:
 
 - Docs index: [docs/index.md](docs/index.md)
@@ -58,7 +70,7 @@ You’ll get the best realtime latency when the detector backend is Triton.
 
 2) Start Triton profile:
 
-`DETECTOR_BACKEND=triton docker compose -f docker/compose.yml -f docker/compose.gpu.yml --profile triton up -d --build`
+`REALTIME_DETECTOR_BACKEND=triton docker compose -f docker/compose.yml -f docker/compose.gpu.yml --profile triton up -d --build`
 
 3) Verify:
 
