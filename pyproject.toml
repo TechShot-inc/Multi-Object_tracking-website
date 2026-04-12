@@ -17,7 +17,7 @@ dependencies = [
   "opencv-python>=4.8",
   "prometheus-client>=0.20",
   "redis>=5.0",
-  "rq>=1.16",
+  "rq>=2.7.0",
 ]
 
 [project.optional-dependencies]
